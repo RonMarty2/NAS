@@ -106,7 +106,9 @@ columnas añadidas con `ALTER TABLE` desde `_MIGRATIONS` en `db.py`.
   2. Acción → **Limpiar** (esto SÍ borra el contenedor; necesario para liberar la imagen).
   3. Menú **Imagen** → borrar `ghcr.io/ronmarty2/nas-organizer` (ya "Sin usar").
   4. Acción → **Construir** (¡no "Iniciar"! "Iniciar" falla con *no container found* tras Limpiar).
-  - Con `pull_policy: always` (ya añadido), en teoría basta **Detener → Construir** y baja la nueva.
+  - ⚠️ **`pull_policy` NO sirve en Synology** (Container Manager lo rechaza: "Additional
+    property is not allowed"). Se quitó del compose. La actualización es **siempre** el
+    método de 4 pasos de arriba (Detener → Limpiar → borrar imagen → Construir).
 - **Gotchas Synology:**
   - No existe botón "Reconstruir" en proyectos por imagen.
   - "Detener" ≠ quitar contenedor; usar "Limpiar" para liberar la imagen.

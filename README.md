@@ -75,14 +75,15 @@ debe estar en **público** una sola vez: GitHub → tu perfil → Packages → `
 > ¿Prefieres compilar desde el código en vez de usar la imagen? Usa `docker-compose.build.yml`.
 
 ### 🔄 Actualizar a la última versión
-La imagen se construye sola en GitHub al subir cambios. Para que el NAS la baje
-(Container Manager, proyecto basado en imagen):
+La imagen se construye sola en GitHub al subir cambios. Synology Container Manager NO
+admite `pull_policy`, así que hay que forzar la bajada borrando la imagen vieja:
 
 1. **Proyecto → `nas-organizer` → Acción → Detener.**
-2. Menú **Imagen** → borra `ghcr.io/ronmarty2/nas-organizer:latest` (la copia vieja).
-3. **Proyecto → `nas-organizer` → Acción → Iniciar** → baja sola la versión nueva.
+2. **Acción → Limpiar** (quita el contenedor, libera la imagen).
+3. Menú **Imagen** → borra `ghcr.io/ronmarty2/nas-organizer:latest`.
+4. **Proyecto → `nas-organizer` → Acción → Construir** (baja la nueva y arranca).
 
-No hay que descargar ni copiar archivos.
+Tus ajustes (API key, idioma, etc.) viven en `./data`, no se pierden.
 
 ### 5. Abre la interfaz
 Desde cualquier navegador (PC o móvil en tu red):

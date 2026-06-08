@@ -1,10 +1,10 @@
 services:
   nas-organizer:
     # Imagen construida automáticamente en GitHub.
+    # OJO: NO usar "pull_policy" aquí — el Container Manager de Synology lo rechaza
+    # ("Additional property is not allowed"). Para actualizar, ver README/BITACORA
+    # (Detener → Limpiar → borrar imagen en la pestaña Imagen → Construir).
     image: ghcr.io/ronmarty2/nas-organizer:latest
-    # Baja la última versión cada vez que se vuelve a crear/levantar el proyecto,
-    # para que actualizar sea solo "Detener" y "Construir" (sin borrar la imagen).
-    pull_policy: always
     container_name: nas-organizer
     restart: unless-stopped
     ports:
