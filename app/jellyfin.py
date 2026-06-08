@@ -19,7 +19,7 @@ def refresh_incremental():
         return False, "Jellyfin no está configurado (URL o API key vacías)."
     url = config.get("jellyfin_url").rstrip("/") + "/Library/Refresh"
     try:
-        r = requests.post(url, headers=_headers(), timeout=15)
+        r = requests.post(url, headers=_headers(), timeout=8)
         r.raise_for_status()
         return True, "Escaneo incremental solicitado a Jellyfin."
     except requests.RequestException as e:
@@ -34,7 +34,7 @@ def refresh_full():
     base = config.get("jellyfin_url").rstrip("/")
     try:
         # Obtiene las carpetas/bibliotecas raíz virtuales
-        r = requests.get(f"{base}/Library/VirtualFolders", headers=_headers(), timeout=15)
+        r = requests.get(f"{base}/Library/VirtualFolders", headers=_headers(), timeout=8)
         r.raise_for_status()
         folders = r.json()
     except requests.RequestException as e:
@@ -55,7 +55,7 @@ def refresh_full():
                     "ImageRefreshMode": "FullRefresh",
                     "ReplaceAllMetadata": "true",
                 },
-                timeout=15,
+                timeout=8,
             )
             count += 1
         except requests.RequestException:

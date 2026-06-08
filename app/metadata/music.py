@@ -52,7 +52,7 @@ def search_musicbrainz(artist, title):
         r = requests.get(
             f"{MB_BASE}/recording",
             params={"query": " AND ".join(query_parts), "fmt": "json", "limit": 1},
-            headers=UA, timeout=15,
+            headers=UA, timeout=8,
         )
         r.raise_for_status()
         recs = r.json().get("recordings", [])
@@ -81,7 +81,7 @@ def search_candidates(query, limit=8):
         r = requests.get(
             f"{MB_BASE}/recording",
             params={"query": query, "fmt": "json", "limit": limit},
-            headers=UA, timeout=15,
+            headers=UA, timeout=8,
         )
         r.raise_for_status()
         recs = r.json().get("recordings", [])

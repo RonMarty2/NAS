@@ -15,10 +15,17 @@ def _ensure_dir():
 
 @contextmanager
 def get_conn():
-    """Devuelve una conexión SQLite con filas tipo dict."""
+    """Devuelve una conexión SQLite con filas tipo dict.
+
+    Modo WAL: permite leer (cambiar de pestaña) mientras el vigilante escribe,
+    así la web no se queda esperando. busy_timeout evita errores 'database locked'.
+    """
     _ensure_dir()
-    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn = sqlite3.connect(DB_PATH, timeout=15)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     try:
         yield conn
         conn.commit()
@@ -146,3 +153,11 @@ def list_items(status=None, media_type=None):
 def delete_item(item_id):
     with get_conn() as conn:
         conn.execute("DELETE FROM items WHERE id=?", (item_id,))
+
+
+def reset_processing():
+    """Devuelve a 'pending' los items que quedaron 'processing' (p.ej. si el
+    contenedor se reinició a mitad de un movimiento). Evita que se queden
+    'Moviendo…' para siempre y que la página se recargue sin parar."""
+    with get_conn() as conn:
+        conn.execute("UPDATE items SET status='pending' WHERE status='processing'")

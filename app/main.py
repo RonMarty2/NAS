@@ -27,6 +27,7 @@ TABS = [
 @app.on_event("startup")
 def _startup():
     db.init_db()
+    db.reset_processing()  # recupera movimientos que quedaron a medias
     watcher.start_background()
 
 
@@ -232,7 +233,9 @@ def edit_music_save(item_id: int, artist: str = Form(""), album: str = Form(""),
 
 @app.post("/scan")
 def manual_scan():
-    watcher.scan_once()
+    # En segundo plano: buscar metadatos puede tardar si la red está lenta,
+    # así que no bloqueamos la página.
+    threading.Thread(target=watcher.scan_once, daemon=True).start()
     return RedirectResponse("/", status_code=303)
 
 

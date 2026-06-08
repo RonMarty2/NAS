@@ -51,7 +51,7 @@ def search(query, media_type, year=None):
     if year:
         params["year" if media_type == "movie" else "first_air_date_year"] = year
     try:
-        r = requests.get(f"{BASE}/search/{tmdb_type}", params=params, timeout=15)
+        r = requests.get(f"{BASE}/search/{tmdb_type}", params=params, timeout=8)
         r.raise_for_status()
         results = r.json().get("results", [])
     except requests.RequestException:
