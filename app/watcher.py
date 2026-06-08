@@ -100,6 +100,33 @@ def _process_file(path):
         db.update_item(item_id, error=str(e))
 
 
+def reenrich_pending():
+    """Vuelve a buscar metadatos para los pendientes de película/serie que aún no
+    tienen coincidencia en TMDB. Útil cuando se acaba de poner la API key: los que
+    ya estaban en la lista consiguen su póster/descripción sin tener que volver a
+    descargarlos. No toca los que ya tienen coincidencia ni los elegidos a mano."""
+    if not tmdb.configured():
+        return
+    for it in db.list_items(status="pending"):
+        if it["media_type"] not in ("movie", "series"):
+            continue
+        if it["tmdb_id"]:
+            continue  # ya reconocido o elegido manualmente
+        query = it["chosen_title"] or it["detected_title"]
+        if not query:
+            continue
+        try:
+            match = tmdb.best_match(query, it["media_type"], it["detected_year"])
+        except Exception:
+            continue
+        if match:
+            db.update_item(
+                it["id"], tmdb_id=match["tmdb_id"], chosen_title=match["title"],
+                chosen_year=match["year"], poster_url=match["poster_url"],
+                overview=match["overview"],
+            )
+
+
 def scan_once():
     """Recorre la carpeta de descargas una vez. Devuelve nº de archivos vistos."""
     root = config.get("downloads_dir")
@@ -110,6 +137,8 @@ def scan_once():
         for f in files:
             _process_file(os.path.join(dirpath, f))
             seen += 1
+    # Reintenta metadatos de lo que quedó pendiente sin reconocer.
+    reenrich_pending()
     return seen
 
 
