@@ -143,3 +143,38 @@ th { color: var(--muted); }
 
 footer { text-align: center; color: var(--muted); padding: 1.5rem; font-size: .8rem; }
 hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
+
+/* ---------------- Móvil (responsivo) ---------------- */
+@media (max-width: 640px) {
+  header { padding: .55rem .7rem; gap: .5rem; }
+  .brand { font-size: 1.05rem; }
+  .tab { padding: .4rem .6rem; font-size: .9rem; }
+  .scan-form { width: 100%; }
+  .scan-form .btn { width: 100%; }
+
+  main { padding: .8rem; }
+  h1 { font-size: 1.2rem; }
+
+  /* Tarjetas más compactas, póster reducido */
+  .card { padding: .8rem; gap: .7rem; }
+  .poster img, .poster-placeholder { width: 84px; height: 126px; }
+  .overview { font-size: .85rem; }
+
+  /* Botones más grandes para el dedo */
+  .btn { padding: .6rem .85rem; }
+  .actions .btn, .actions select { flex: 1 1 auto; text-align: center; }
+
+  /* Lista de episodios: cada fila como bloque (no tabla apretada) */
+  .ep-table, .ep-table tbody, .ep-table tr, .ep-table td { display: block; width: 100%; }
+  .ep-table thead { display: none; }
+  .ep-table tr { border-bottom: 1px solid var(--border); padding: .5rem 0; }
+  .ep-table td { border: none; padding: .1rem .1rem; max-width: none; }
+  .ep-orig { font-size: .78rem; max-width: none; }
+  .ep-new { white-space: normal; font-weight: 600; margin: .15rem 0; }
+  .ep-actions { justify-content: flex-start; gap: .6rem; margin-top: .35rem; }
+  .ep-actions .btn { padding: .45rem .8rem; }
+
+  /* Resultados de búsqueda e historial */
+  .result img, .result .poster-placeholder { width: 70px; height: 105px; }
+  .result { padding: .8rem; gap: .7rem; }
+}
