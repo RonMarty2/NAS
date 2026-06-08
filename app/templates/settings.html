@@ -76,6 +76,16 @@
   </form>
 
   <hr>
+  <h2>Limpiar duplicados (todo)</h2>
+  <p class="meta">Busca en TODO lo pendiente (películas, series y música) archivos
+    <strong>idénticos</strong> y borra los repetidos, conservando una copia legible de cada uno.
+    Verifica por SHA-256 antes de borrar; lo que no sea idéntico no se toca. Corre en segundo plano.</p>
+  <form method="post" action="/dedup-all"
+        onsubmit="return confirm('Se calculará el SHA-256 de los archivos repetidos y se borrarán SOLO los idénticos, conservando uno de cada. ¿Continuar?');">
+    <button class="btn btn-danger" type="submit">🧹 Borrar duplicados idénticos de toda la biblioteca pendiente</button>
+  </form>
+
+  <hr>
   <h2>Mantenimiento de Jellyfin</h2>
   <p class="meta">Tras cada descarga se hace un escaneo incremental (solo lo nuevo).
     Usa este botón solo si quieres forzar un refresco completo de toda la biblioteca.</p>

@@ -3,6 +3,7 @@ import html
 import os
 import threading
 from typing import List
+from urllib.parse import quote
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -303,6 +304,18 @@ def dedup_series(ids: List[int] = Form(...)):
     threading.Thread(target=duplicates.delete_all_exact_duplicates,
                      args=(list(ids),), daemon=True).start()
     return RedirectResponse("/tab/series?dedup=1", status_code=303)
+
+
+@app.post("/dedup-all")
+def dedup_all():
+    """Borra en lote los duplicados idénticos de TODO lo pendiente (en segundo plano)."""
+    ids = [it["id"] for it in db.list_items(status="pending")]
+    threading.Thread(target=duplicates.delete_all_exact_duplicates,
+                     args=(ids,), daemon=True).start()
+    return RedirectResponse(
+        "/settings?msg=" + quote("🧹 Limpiando duplicados idénticos en segundo plano. "
+                                 "Revisa las pestañas en un momento."),
+        status_code=303)
 
 
 @app.post("/item/{item_id}/skip")
