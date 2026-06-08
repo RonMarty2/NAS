@@ -1,0 +1,3 @@
+# Esta carpeta guarda la base de datos del programa (nas.db).
+# El archivo .gitkeep existe solo para que la carpeta 'data' venga incluida
+# en la descarga y el contenedor pueda arrancar sin tener que crearla a mano.

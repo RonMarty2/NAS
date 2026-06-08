@@ -1,5 +1,6 @@
 # Datos persistentes y entorno
-/data/
+/data/*
+!/data/.gitkeep
 *.db
 .env
 
