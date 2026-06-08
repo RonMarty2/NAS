@@ -1,0 +1,16 @@
+# Datos persistentes y entorno
+/data/
+*.db
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Sistema
+.DS_Store
+Thumbs.db

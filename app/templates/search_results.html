@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Buscar metadatos</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main>
+    <a class="btn btn-ghost" href="/tab/{{ item['media_type'] if item else 'movie' }}">← Volver</a>
+    <h1>Editar metadatos</h1>
+    {% if item %}
+      <p class="meta">Archivo: <strong>{{ item["filename"] }}</strong></p>
+
+      <form method="get" action="/item/{{ item['id'] }}/search" class="search-bar">
+        <input type="text" name="q" value="{{ q }}" placeholder="Escribe el título correcto…" autofocus>
+        <button class="btn btn-primary" type="submit">🔍 Buscar</button>
+      </form>
+
+      {% if q and not results %}
+        <p class="empty">Sin resultados para “{{ q }}”. Prueba con otro título o revisa tu API key de TMDB en Ajustes.</p>
+      {% endif %}
+
+      <div class="results">
+        {% for r in results %}
+          <div class="result">
+            {% if r["poster_url"] %}<img src="{{ r['poster_url'] }}" alt="">
+            {% else %}<div class="poster-placeholder">Sin imagen</div>{% endif %}
+            <div>
+              <h3>{{ r["title"] }} {% if r["year"] %}({{ r["year"] }}){% endif %}</h3>
+              <p class="overview">{{ (r["overview"] or "")[:240] }}</p>
+              <form method="post" action="/item/{{ item['id'] }}/choose">
+                <input type="hidden" name="tmdb_id" value="{{ r['tmdb_id'] }}">
+                <input type="hidden" name="title" value="{{ r['title'] }}">
+                <input type="hidden" name="year" value="{{ r['year'] or '' }}">
+                <input type="hidden" name="poster_url" value="{{ r['poster_url'] or '' }}">
+                <input type="hidden" name="overview" value="{{ r['overview'] or '' }}">
+                <button class="btn btn-primary" type="submit">Usar este</button>
+              </form>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </main>
+</body>
+</html>

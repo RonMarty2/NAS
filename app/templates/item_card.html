@@ -1,0 +1,58 @@
+<div class="card">
+  <div class="poster">
+    {% if item["poster_url"] %}
+      <img src="{{ item['poster_url'] }}" alt="póster">
+    {% else %}
+      <div class="poster-placeholder">Sin imagen</div>
+    {% endif %}
+  </div>
+
+  <div class="info">
+    <div class="filename" title="{{ item['original_path'] }}">📄 {{ item["filename"] }}</div>
+
+    {% if item["media_type"] == "music" %}
+      <h3>{{ item["chosen_title"] or "Artista desconocido" }}</h3>
+      <p class="meta">Álbum: {{ item["overview"] or "—" }} · Pista: {{ item["episode"] or "—" }}</p>
+      <p class="meta">Título: {{ item["detected_title"] or "—" }}</p>
+    {% elif item["media_type"] == "series" %}
+      <h3>{{ item["chosen_title"] or item["detected_title"] or "¿?" }}
+        {% if item["chosen_year"] %}({{ item["chosen_year"] }}){% endif %}</h3>
+      <p class="meta">Temporada {{ "%02d"|format(item["season"] or 1) }} ·
+        Episodio {{ "%02d"|format(item["episode"] or 1) }}</p>
+      {% if item["overview"] %}<p class="overview">{{ item["overview"][:220] }}</p>{% endif %}
+    {% else %}
+      <h3>{{ item["chosen_title"] or item["detected_title"] or "¿?" }}
+        {% if item["chosen_year"] %}({{ item["chosen_year"] }}){% endif %}</h3>
+      {% if item["overview"] %}<p class="overview">{{ item["overview"][:220] }}</p>{% endif %}
+    {% endif %}
+
+    {% if item["error"] %}<p class="error">⚠️ {{ item["error"] }}</p>{% endif %}
+
+    <div class="actions">
+      <form method="post" action="/item/{{ item['id'] }}/confirm">
+        <button class="btn btn-primary" type="submit">✅ Confirmar y mover</button>
+      </form>
+
+      {% if item["media_type"] in ("movie", "series") %}
+        <a class="btn btn-secondary" href="/item/{{ item['id'] }}/search?q={{ (item['chosen_title'] or item['detected_title'] or '')|urlencode }}">✏️ Editar / buscar</a>
+      {% endif %}
+
+      <form method="post" action="/item/{{ item['id'] }}/type" class="type-form">
+        <select name="media_type">
+          <option value="movie"  {{ 'selected' if item['media_type']=='movie' else '' }}>Película</option>
+          <option value="series" {{ 'selected' if item['media_type']=='series' else '' }}>Serie</option>
+          <option value="music"  {{ 'selected' if item['media_type']=='music' else '' }}>Música</option>
+        </select>
+        <button class="btn btn-secondary" type="submit">Cambiar tipo</button>
+      </form>
+
+      <form method="post" action="/item/{{ item['id'] }}/skip">
+        <button class="btn btn-ghost" type="submit">⏭️ Omitir</button>
+      </form>
+      <form method="post" action="/item/{{ item['id'] }}/delete"
+            onsubmit="return confirm('¿Borrar el archivo del disco? Esta acción no se puede deshacer.');">
+        <button class="btn btn-danger" type="submit">🗑️ Eliminar</button>
+      </form>
+    </div>
+  </div>
+</div>

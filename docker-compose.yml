@@ -1,0 +1,29 @@
+services:
+  nas-organizer:
+    build: .
+    # Si prefieres una imagen ya construida, comenta "build" y usa "image".
+    container_name: nas-organizer
+    restart: unless-stopped
+    ports:
+      # Cambia 8678 si ese puerto ya está ocupado en tu NAS.
+      - "8678:8678"
+    environment:
+      # --- Valores iniciales (luego se pueden editar desde la pestaña Ajustes) ---
+      # Rutas DENTRO del contenedor (no las del NAS). Se mapean en "volumes".
+      - NAS_DOWNLOADS_DIR=/downloads
+      - NAS_MOVIES_DIR=/media/Películas
+      - NAS_SERIES_DIR=/media/Series
+      - NAS_MUSIC_DIR=/media/Música
+      # Claves y Jellyfin (opcionales aquí, también se configuran en la web)
+      - TMDB_API_KEY=${TMDB_API_KEY:-}
+      - JELLYFIN_URL=${JELLYFIN_URL:-}
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
+      - METADATA_LANGUAGE=es-ES
+      - TZ=America/Mexico_City
+    volumes:
+      # IZQUIERDA = ruta real en tu NAS Synology. DERECHA = ruta dentro del contenedor.
+      # Ajusta SOLO la parte izquierda a tus carpetas reales.
+      - /volume1/downloads:/downloads
+      - /volume1/media:/media
+      # Datos persistentes de la app (base de datos). No lo borres.
+      - ./data:/data

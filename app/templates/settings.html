@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>Ajustes</h1>
+  {% if saved %}<p class="ok">✅ Ajustes guardados.</p>{% endif %}
+  {% if msg %}<p class="ok">{{ msg }}</p>{% endif %}
+
+  <form method="post" action="/settings" class="settings">
+    <fieldset>
+      <legend>Carpetas (rutas dentro del contenedor)</legend>
+      <label>Carpeta de descargas
+        <input type="text" name="downloads_dir" value="{{ cfg['downloads_dir'] }}"></label>
+      <label>Carpeta de Películas
+        <input type="text" name="movies_dir" value="{{ cfg['movies_dir'] }}"></label>
+      <label>Carpeta de Series
+        <input type="text" name="series_dir" value="{{ cfg['series_dir'] }}"></label>
+      <label>Carpeta de Música
+        <input type="text" name="music_dir" value="{{ cfg['music_dir'] }}"></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Metadatos</legend>
+      <label>API key de TheMovieDB (TMDB)
+        <input type="text" name="tmdb_api_key" value="{{ cfg['tmdb_api_key'] }}"
+               placeholder="Regístrate gratis en themoviedb.org"></label>
+      <label>Idioma de los metadatos
+        <input type="text" name="metadata_language" value="{{ cfg['metadata_language'] }}"
+               placeholder="es-ES"></label>
+      <label>Tamaño mínimo de vídeo (MB) para considerarlo
+        <input type="text" name="min_size_mb" value="{{ cfg['min_size_mb'] }}"></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Jellyfin</legend>
+      <label>URL de Jellyfin
+        <input type="text" name="jellyfin_url" value="{{ cfg['jellyfin_url'] }}"
+               placeholder="http://192.168.1.10:8096"></label>
+      <label>API key de Jellyfin
+        <input type="text" name="jellyfin_api_key" value="{{ cfg['jellyfin_api_key'] }}"
+               placeholder="Panel de control → API Keys"></label>
+    </fieldset>
+
+    <button class="btn btn-primary" type="submit">💾 Guardar ajustes</button>
+  </form>
+
+  <hr>
+  <h2>Mantenimiento de Jellyfin</h2>
+  <p class="meta">Tras cada descarga se hace un escaneo incremental (solo lo nuevo).
+    Usa este botón solo si quieres forzar un refresco completo de toda la biblioteca.</p>
+  <form method="post" action="/jellyfin/refresh-full">
+    <button class="btn btn-secondary" type="submit">🔁 Actualizar todo en Jellyfin</button>
+  </form>
+{% endblock %}

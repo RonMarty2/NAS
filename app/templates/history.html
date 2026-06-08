@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>Historial</h1>
+
+  <h2>✅ Movidos ({{ done|length }})</h2>
+  {% if done %}
+    <table>
+      <thead><tr><th>Archivo</th><th>Tipo</th><th>Destino</th><th>Fecha</th></tr></thead>
+      <tbody>
+      {% for it in done %}
+        <tr>
+          <td>{{ it["filename"] }}</td>
+          <td>{{ it["media_type"] }}</td>
+          <td class="path">{{ it["dest_path"] }}</td>
+          <td>{{ it["processed_at"] }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}<p class="empty">Aún no has movido nada.</p>{% endif %}
+
+  {% if errored %}
+    <h2>⚠️ Con error ({{ errored|length }})</h2>
+    <table>
+      <thead><tr><th>Archivo</th><th>Error</th></tr></thead>
+      <tbody>
+      {% for it in errored %}
+        <tr><td>{{ it["filename"] }}</td><td class="error">{{ it["error"] }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  {% if skipped %}
+    <h2>⏭️ Omitidos ({{ skipped|length }})</h2>
+    <ul>{% for it in skipped %}<li>{{ it["filename"] }}</li>{% endfor %}</ul>
+  {% endif %}
+{% endblock %}

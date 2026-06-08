@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>{% for k, l in tabs %}{% if k == active %}{{ l }}{% endif %}{% endfor %} pendientes</h1>
+
+  {% if not items %}
+    <p class="empty">No hay nada por revisar aquí. Cuando JDownloader termine una descarga,
+    aparecerá automáticamente. También puedes pulsar <strong>🔄 Buscar ahora</strong>.</p>
+  {% endif %}
+
+  <div class="cards">
+    {% for item in items %}
+      {% include "item_card.html" %}
+    {% endfor %}
+  </div>
+{% endblock %}

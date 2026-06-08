@@ -1,0 +1,130 @@
+"""Capa de base de datos (SQLite, sin ORM para mantenerlo simple)."""
+import os
+import sqlite3
+import threading
+from contextlib import contextmanager
+
+DB_PATH = os.environ.get("NAS_DB_PATH", os.path.join(os.path.dirname(__file__), "..", "data", "nas.db"))
+
+_lock = threading.Lock()
+
+
+def _ensure_dir():
+    os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)), exist_ok=True)
+
+
+@contextmanager
+def get_conn():
+    """Devuelve una conexión SQLite con filas tipo dict."""
+    _ensure_dir()
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
+
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);
+
+CREATE TABLE IF NOT EXISTS items (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    original_path  TEXT NOT NULL,
+    filename       TEXT NOT NULL,
+    size_bytes     INTEGER DEFAULT 0,
+    media_type     TEXT DEFAULT 'unknown',   -- movie | series | music | unknown
+    status         TEXT DEFAULT 'pending',   -- pending | done | skipped | error
+    detected_title TEXT,
+    detected_year  INTEGER,
+    season         INTEGER,
+    episode        INTEGER,
+    tmdb_id        INTEGER,
+    chosen_title   TEXT,
+    chosen_year    INTEGER,
+    poster_url     TEXT,
+    overview       TEXT,
+    dest_path      TEXT,
+    error          TEXT,
+    created_at     TEXT DEFAULT (datetime('now')),
+    processed_at   TEXT,
+    UNIQUE(original_path)
+);
+"""
+
+
+def init_db():
+    with get_conn() as conn:
+        conn.executescript(SCHEMA)
+
+
+# ---------------- Ajustes (settings) ----------------
+
+def get_setting(key, default=None):
+    with get_conn() as conn:
+        row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
+        return row["value"] if row else default
+
+
+def set_setting(key, value):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO settings(key, value) VALUES(?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, "" if value is None else str(value)),
+        )
+
+
+def all_settings():
+    with get_conn() as conn:
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+        return {r["key"]: r["value"] for r in rows}
+
+
+# ---------------- Items (cola y historial) ----------------
+
+def add_item(original_path, filename, size_bytes=0):
+    """Inserta un archivo nuevo si no existe. Devuelve el id o None si ya existía."""
+    with _lock, get_conn() as conn:
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO items(original_path, filename, size_bytes) VALUES(?,?,?)",
+            (original_path, filename, size_bytes),
+        )
+        return cur.lastrowid if cur.rowcount else None
+
+
+def get_item(item_id):
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM items WHERE id=?", (item_id,)).fetchone()
+
+
+def update_item(item_id, **fields):
+    if not fields:
+        return
+    cols = ", ".join(f"{k}=?" for k in fields)
+    vals = list(fields.values()) + [item_id]
+    with get_conn() as conn:
+        conn.execute(f"UPDATE items SET {cols} WHERE id=?", vals)
+
+
+def list_items(status=None, media_type=None):
+    q = "SELECT * FROM items WHERE 1=1"
+    args = []
+    if status:
+        q += " AND status=?"
+        args.append(status)
+    if media_type:
+        q += " AND media_type=?"
+        args.append(media_type)
+    q += " ORDER BY created_at DESC, id DESC"
+    with get_conn() as conn:
+        return conn.execute(q, args).fetchall()
+
+
+def delete_item(item_id):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM items WHERE id=?", (item_id,))
