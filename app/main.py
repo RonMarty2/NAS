@@ -1,6 +1,7 @@
 """Aplicación web (FastAPI) — bandeja de revisión de descargas para Jellyfin."""
 import os
 import threading
+from typing import List
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -51,12 +52,53 @@ def service_worker():
     return Response(content=_SW_JS, media_type="application/javascript")
 
 
+def _group_series(items):
+    """Agrupa los episodios pendientes por serie (una tarjeta por serie)."""
+    groups = {}
+    for it in items:
+        key = it["tmdb_id"] or (it["chosen_title"] or it["detected_title"] or "¿?").lower()
+        g = groups.get(key)
+        if not g:
+            g = {
+                "gid": "g%d" % len(groups),
+                "title": it["chosen_title"] or it["detected_title"] or "¿?",
+                "year": it["chosen_year"],
+                "poster_url": it["poster_url"],
+                "overview": it["overview"],
+                "default_base": it["dest_folder"] or organizer.default_base("series"),
+                "episodes": [],
+            }
+            groups[key] = g
+        # Conservamos el primer póster/sinopsis que aparezca
+        if not g["poster_url"] and it["poster_url"]:
+            g["poster_url"] = it["poster_url"]
+        if not g["overview"] and it["overview"]:
+            g["overview"] = it["overview"]
+        g["episodes"].append(it)
+    result = list(groups.values())
+    for g in result:
+        g["episodes"].sort(key=lambda x: ((x["season"] or 0), (x["episode"] or 0)))
+        g["count"] = len(g["episodes"])
+        g["processing"] = any(e["status"] == "processing" for e in g["episodes"])
+    result.sort(key=lambda g: g["title"].lower())
+    return result
+
+
 @app.get("/tab/{media_type}", response_class=HTMLResponse)
 def tab(request: Request, media_type: str):
     # Mostramos lo pendiente y lo que se está moviendo (para ver el progreso).
     processing = db.list_items(status="processing", media_type=media_type)
     pending = db.list_items(status="pending", media_type=media_type)
     items = processing + pending
+
+    if media_type == "series":
+        # Series: una tarjeta por serie, expandible con sus episodios.
+        groups = _group_series(items)
+        return templates.TemplateResponse("series.html", {
+            "request": request, "tabs": TABS, "active": media_type, "page": "tabs",
+            "groups": groups, "has_processing": bool(processing),
+        })
+
     leaves = {it["id"]: organizer.leaf_path(it) for it in items}
     defaults = {it["id"]: (it["dest_folder"] or organizer.default_base(it["media_type"]))
                 for it in items}
@@ -171,6 +213,23 @@ def confirm(item_id: int, dest_folder: str = Form(""), new_subfolder: str = Form
     db.update_item(item_id, dest_folder=target, status="processing", error=None)
     threading.Thread(target=_do_move, args=(item_id,), daemon=True).start()
     return _redirect_to_type(item["media_type"])
+
+
+@app.post("/series/confirm-all")
+def confirm_series(ids: List[int] = Form(...), dest_folder: str = Form(""),
+                   new_subfolder: str = Form("")):
+    """Confirma y mueve TODOS los episodios de una serie a la vez."""
+    base = dest_folder.strip() or organizer.default_base("series")
+    target = folders.ensure_folder(base, new_subfolder)
+    if target is None:
+        return _redirect_to_type("series")
+    for item_id in ids:
+        item = db.get_item(item_id)
+        if not item or item["status"] != "pending":
+            continue
+        db.update_item(item_id, dest_folder=target, status="processing", error=None)
+        threading.Thread(target=_do_move, args=(item_id,), daemon=True).start()
+    return _redirect_to_type("series")
 
 
 @app.post("/item/{item_id}/skip")

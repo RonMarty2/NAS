@@ -88,6 +88,21 @@ h1 { font-size: 1.4rem; }
   border: 1px solid var(--border); border-radius: 8px; width: 100%; }
 .fm-actions { display: flex; justify-content: flex-end; gap: .5rem; }
 
+/* Series agrupadas */
+.badge { background: var(--primary); color: #fff; font-size: .72rem; font-weight: 600;
+  padding: .12rem .5rem; border-radius: 999px; vertical-align: middle; margin-left: .4rem; }
+.episodes { margin: .7rem 0; }
+.episodes summary { cursor: pointer; color: var(--primary); font-weight: 600; padding: .4rem 0; }
+.ep-table { width: 100%; border-collapse: collapse; margin-top: .4rem; }
+.ep-table th, .ep-table td { text-align: left; padding: .35rem .4rem; border-bottom: 1px solid var(--border);
+  font-size: .8rem; vertical-align: middle; }
+.ep-table th { color: var(--muted); font-weight: 500; }
+.ep-orig { color: var(--muted); word-break: break-all; max-width: 0; }
+.ep-new { color: var(--text); white-space: nowrap; }
+.ep-actions { display: flex; gap: .3rem; }
+.ep-actions form { margin: 0; }
+.btn-sm { padding: .25rem .45rem; font-size: .8rem; }
+
 .actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .8rem; align-items: center; }
 .actions form { margin: 0; }
 .type-form { display: flex; gap: .3rem; }

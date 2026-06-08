@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>Series pendientes</h1>
+
+  {% if not groups %}
+    <p class="empty">No hay series por revisar. Cuando JDownloader baje episodios,
+    aparecerán aquí agrupados por serie. También puedes pulsar <strong>🔄 Buscar ahora</strong>.</p>
+  {% endif %}
+
+  <div class="cards">
+    {% for g in groups %}
+      <div class="card">
+        <div class="poster">
+          {% if g.poster_url %}<img src="{{ g.poster_url }}" alt="póster">
+          {% else %}<div class="poster-placeholder">Sin imagen</div>{% endif %}
+        </div>
+
+        <div class="info">
+          <h3>{{ g.title }}{% if g.year %} ({{ g.year }}){% endif %}
+            <span class="badge">{{ g.count }} episodio{{ 's' if g.count != 1 else '' }}</span></h3>
+          {% if g.overview %}<p class="overview">{{ g.overview[:200] }}</p>{% endif %}
+
+          {% if g.processing %}
+            <p class="processing">⏳ Moviendo episodios… <small>(la página se actualiza sola)</small></p>
+          {% endif %}
+
+          {# ---- Carpeta destino para toda la serie ---- #}
+          <div class="dest-form" data-item="{{ g.gid }}" data-leaf="{{ g.title }}/Season XX/…">
+            <div class="dest-row">
+              <span>📁 Mover a:</span>
+              <strong class="chosen-folder" id="chosen-{{ g.gid }}">{{ g.default_base }}</strong>
+              <button type="button" class="btn btn-secondary"
+                      onclick="openFolderPicker('{{ g.gid }}', '{{ g.default_base }}')">📂 Elegir carpeta…</button>
+            </div>
+            <p class="preview">Se guardarán en:
+              <span id="prev-{{ g.gid }}">{{ g.default_base }}/{{ g.title }}/Season …</span></p>
+            <form method="post" action="/series/confirm-all">
+              {% for ep in g.episodes %}<input type="hidden" name="ids" value="{{ ep['id'] }}">{% endfor %}
+              <input type="hidden" name="dest_folder" id="dest-{{ g.gid }}" value="{{ g.default_base }}">
+              <button class="btn btn-primary" type="submit">✅ Confirmar y mover los {{ g.count }}</button>
+            </form>
+          </div>
+
+          {# ---- Lista expandible de episodios (verificación) ---- #}
+          <details class="episodes">
+            <summary>👁️ Ver y verificar los {{ g.count }} episodios</summary>
+            <table class="ep-table">
+              <thead><tr><th>Archivo original</th><th>→ Se renombrará a</th><th></th></tr></thead>
+              <tbody>
+              {% for ep in g.episodes %}
+                <tr>
+                  <td class="ep-orig" title="{{ ep['original_path'] }}">{{ ep['filename'] }}</td>
+                  <td class="ep-new">
+                    {{ g.title }} S{{ '%02d'|format(ep['season'] or 1) }}E{{ '%02d'|format(ep['episode'] or 1) }}
+                    {% if ep['status'] == 'processing' %}<span class="processing"> · ⏳</span>{% endif %}
+                  </td>
+                  <td class="ep-actions">
+                    {% if ep['status'] != 'processing' %}
+                      <form method="post" action="/item/{{ ep['id'] }}/skip"><button class="btn btn-ghost btn-sm">⏭️</button></form>
+                      <form method="post" action="/item/{{ ep['id'] }}/delete"
+                            onsubmit="return confirm('¿Borrar este archivo del disco?');">
+                        <button class="btn btn-danger btn-sm">🗑️</button></form>
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </details>
+
+          {# ---- Acciones de la serie completa ---- #}
+          <div class="actions">
+            <a class="btn btn-secondary" href="/item/{{ g.episodes[0]['id'] }}/search?q={{ g.title|urlencode }}">✏️ Corregir serie</a>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% endblock %}
