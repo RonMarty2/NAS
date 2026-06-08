@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Editar etiquetas de música</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main>
+    <a class="btn btn-ghost" href="/tab/music">← Volver</a>
+    <h1>🎵 Editar etiquetas</h1>
+    {% if item %}
+      <p class="meta">Archivo: <strong>{{ item["filename"] }}</strong></p>
+
+      <form method="post" action="/item/{{ item['id'] }}/edit-music" class="settings">
+        <fieldset>
+          <legend>Datos de la canción</legend>
+          <label>Artista
+            <input type="text" name="artist" value="{{ item['artist'] or '' }}"></label>
+          <label>Álbum
+            <input type="text" name="album" value="{{ item['album'] or '' }}"></label>
+          <label>Título de la canción
+            <input type="text" name="title" value="{{ item['detected_title'] or '' }}"></label>
+          <label>Nº de pista (opcional)
+            <input type="text" name="track_no" value="{{ item['track_no'] or '' }}"></label>
+        </fieldset>
+        <button class="btn btn-primary" type="submit">💾 Guardar y volver</button>
+      </form>
+
+      <hr>
+      <h2>Buscar en MusicBrainz</h2>
+      <form method="get" action="/item/{{ item['id'] }}/edit-music" class="search-bar">
+        <input type="text" name="q" value="{{ q }}"
+               placeholder="Ej: Thundercats opening theme" autofocus>
+        <button class="btn btn-secondary" type="submit">🔍 Buscar</button>
+      </form>
+
+      {% if q and not candidates %}
+        <p class="empty">Sin resultados para “{{ q }}”.</p>
+      {% endif %}
+
+      <div class="results">
+        {% for c in candidates %}
+          <div class="result">
+            <div>
+              <h3>{{ c["title"] or "—" }}</h3>
+              <p class="meta">Artista: {{ c["artist"] or "—" }} ·
+                Álbum: {{ c["album"] or "—" }}{% if c["track"] %} · Pista {{ c["track"] }}{% endif %}</p>
+              <form method="post" action="/item/{{ item['id'] }}/edit-music">
+                <input type="hidden" name="artist" value="{{ c['artist'] or '' }}">
+                <input type="hidden" name="album" value="{{ c['album'] or '' }}">
+                <input type="hidden" name="title" value="{{ c['title'] or '' }}">
+                <input type="hidden" name="track_no" value="{{ c['track'] or '' }}">
+                <button class="btn btn-primary" type="submit">Usar estos datos</button>
+              </form>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </main>
+</body>
+</html>

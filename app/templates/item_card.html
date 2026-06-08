@@ -11,9 +11,9 @@
     <div class="filename" title="{{ item['original_path'] }}">📄 {{ item["filename"] }}</div>
 
     {% if item["media_type"] == "music" %}
-      <h3>{{ item["chosen_title"] or "Artista desconocido" }}</h3>
-      <p class="meta">Álbum: {{ item["overview"] or "—" }} · Pista: {{ item["episode"] or "—" }}</p>
-      <p class="meta">Título: {{ item["detected_title"] or "—" }}</p>
+      <h3>🎵 {{ item["detected_title"] or "Canción sin título" }}</h3>
+      <p class="meta">Artista: {{ item["artist"] or "—" }}</p>
+      <p class="meta">Álbum: {{ item["album"] or "—" }}{% if item["track_no"] %} · Pista {{ item["track_no"] }}{% endif %}</p>
     {% elif item["media_type"] == "series" %}
       <h3>{{ item["chosen_title"] or item["detected_title"] or "¿?" }}
         {% if item["chosen_year"] %}({{ item["chosen_year"] }}){% endif %}</h3>
@@ -35,6 +35,8 @@
 
       {% if item["media_type"] in ("movie", "series") %}
         <a class="btn btn-secondary" href="/item/{{ item['id'] }}/search?q={{ (item['chosen_title'] or item['detected_title'] or '')|urlencode }}">✏️ Editar / buscar</a>
+      {% else %}
+        <a class="btn btn-secondary" href="/item/{{ item['id'] }}/edit-music">✏️ Editar etiquetas</a>
       {% endif %}
 
       <form method="post" action="/item/{{ item['id'] }}/type" class="type-form">

@@ -17,6 +17,8 @@ de Jellyfin y Jellyfin se actualiza solo.
 - 🔎 **Detecta** automáticamente lo nuevo en tu carpeta de descargas.
 - 🏷️ **Identifica** películas y series con TheMovieDB (título, año, póster, sinopsis) y
   música por sus etiquetas / MusicBrainz.
+- 🎵 **Música editable**: corrige artista, álbum, título y nº de pista a mano, o búscalos en
+  MusicBrainz desde la propia web.
 - 🗂️ Pestañas separadas: **Películas · Series · Música**.
 - ✅ Tú **confirmas con un clic**; también puedes **Editar** (buscar el título correcto),
   **Cambiar tipo**, **Omitir** o **Eliminar**.
@@ -103,7 +105,8 @@ Entra a la pestaña **Ajustes** y rellena:
   música con **mutagen + MusicBrainz**.
 - La app **espera ~60 s** a que un archivo deje de cambiar antes de procesarlo, para no
   tocar descargas a medias. Ignora archivos `.part`, `.tmp`, etc.
-- La música es *mejor esfuerzo*: depende de las etiquetas existentes del archivo.
+- La música usa primero las etiquetas del archivo; si faltan, puedes editarlas a mano o
+  buscarlas en MusicBrainz desde **✏️ Editar etiquetas** en cada canción.
 - Cambia el puerto `8678` en `docker-compose.yml` si ya está ocupado.
 
 ## 🛠️ Desarrollo local (sin Docker)

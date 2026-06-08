@@ -58,13 +58,11 @@ def _enrich(item_id, path, ident):
 
     elif media_type == "music":
         m = music_meta.identify_music(path)
-        # Reutilizamos columnas: chosen_title=Artista, overview=Álbum,
-        # detected_title=Título de pista, episode=nº de pista.
         fields.update({
-            "chosen_title": m.get("artist") or "Desconocido",
-            "overview": m.get("album") or "Desconocido",
-            "detected_title": m.get("title"),
-            "episode": m.get("track"),
+            "artist": m.get("artist") or "Desconocido",
+            "album": m.get("album") or "Desconocido",
+            "track_no": m.get("track"),
+            "detected_title": m.get("title"),   # título de la canción
             "detected_year": m.get("year"),
         })
 

@@ -48,6 +48,10 @@ CREATE TABLE IF NOT EXISTS items (
     chosen_year    INTEGER,
     poster_url     TEXT,
     overview       TEXT,
+    -- Campos específicos de música
+    artist         TEXT,
+    album          TEXT,
+    track_no       TEXT,
     dest_path      TEXT,
     error          TEXT,
     created_at     TEXT DEFAULT (datetime('now')),
@@ -56,10 +60,22 @@ CREATE TABLE IF NOT EXISTS items (
 );
 """
 
+# Columnas añadidas después de la primera versión (migración para BD existentes).
+_MIGRATIONS = {
+    "artist": "TEXT",
+    "album": "TEXT",
+    "track_no": "TEXT",
+}
+
 
 def init_db():
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+        # Migración: añade columnas que falten en bases de datos antiguas.
+        existing = {r["name"] for r in conn.execute("PRAGMA table_info(items)").fetchall()}
+        for col, coltype in _MIGRATIONS.items():
+            if col not in existing:
+                conn.execute(f"ALTER TABLE items ADD COLUMN {col} {coltype}")
 
 
 # ---------------- Ajustes (settings) ----------------

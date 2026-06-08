@@ -70,6 +70,43 @@ def search_musicbrainz(artist, title):
     return {"artist": artist_name, "album": album, "title": rec.get("title")}
 
 
+def search_candidates(query, limit=8):
+    """Búsqueda libre en MusicBrainz para la edición manual desde la web.
+
+    Devuelve una lista de dicts {artist, album, title, track}.
+    """
+    if not query:
+        return []
+    try:
+        r = requests.get(
+            f"{MB_BASE}/recording",
+            params={"query": query, "fmt": "json", "limit": limit},
+            headers=UA, timeout=15,
+        )
+        r.raise_for_status()
+        recs = r.json().get("recordings", [])
+    except requests.RequestException:
+        return []
+
+    out = []
+    for rec in recs:
+        artist = None
+        if rec.get("artist-credit"):
+            artist = rec["artist-credit"][0].get("name")
+        album = track = None
+        if rec.get("releases"):
+            rel = rec["releases"][0]
+            album = rel.get("title")
+            media = rel.get("media") or []
+            if media and media[0].get("track"):
+                track = media[0]["track"][0].get("number")
+        out.append({
+            "artist": artist, "album": album,
+            "title": rec.get("title"), "track": track,
+        })
+    return out
+
+
 def identify_music(path):
     """Devuelve metadatos de música combinando etiquetas + MusicBrainz."""
     tags = from_tags(path)

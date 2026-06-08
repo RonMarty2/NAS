@@ -49,15 +49,16 @@ def build_dest(item):
         return os.path.join(base, fname)
 
     if media_type == "music":
-        artist = safe_name(g("detected_title") and None)  # se rellena abajo
-        # Para música usamos campos guardados en chosen_title="Artista - Álbum"
-        # pero preferimos columnas dedicadas si existen.
-        artist = safe_name(g("chosen_title") or "Desconocido")
-        album = safe_name(g("overview") or "Desconocido")  # reutilizamos overview para álbum
-        track = _two(g("episode"))  # reutilizamos episode para nº de pista
+        artist = safe_name(g("artist") or "Desconocido")
+        album = safe_name(g("album") or "Desconocido")
         title = safe_name(g("detected_title") or os.path.splitext(g("filename"))[0])
+        # El nº de pista es opcional: si no lo hay, no anteponemos "NN - ".
+        track_raw = g("track_no")
+        if track_raw not in (None, ""):
+            fname = f"{_two(track_raw)} - {title}{ext}"
+        else:
+            fname = f"{title}{ext}"
         base = os.path.join(config.get("music_dir"), artist, album)
-        fname = f"{track} - {title}{ext}"
         return os.path.join(base, fname)
 
     # Desconocido: lo dejamos en una subcarpeta "Sin clasificar" dentro de películas

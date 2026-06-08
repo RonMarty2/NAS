@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from . import config, db, jellyfin, organizer, watcher
+from .metadata import music as music_meta
 from .metadata import tmdb
 
 BASE_DIR = os.path.dirname(__file__)
@@ -153,6 +154,28 @@ def choose(item_id: int, tmdb_id: int = Form(...), title: str = Form(...),
     )
     item = db.get_item(item_id)
     return _redirect_to_type(item["media_type"] if item else "movie")
+
+
+@app.get("/item/{item_id}/edit-music", response_class=HTMLResponse)
+def edit_music_form(request: Request, item_id: int, q: str = ""):
+    item = db.get_item(item_id)
+    candidates = music_meta.search_candidates(q) if q else []
+    return templates.TemplateResponse("edit_music.html", {
+        "request": request, "item": item, "candidates": candidates, "q": q,
+    })
+
+
+@app.post("/item/{item_id}/edit-music")
+def edit_music_save(item_id: int, artist: str = Form(""), album: str = Form(""),
+                    title: str = Form(""), track_no: str = Form("")):
+    db.update_item(
+        item_id,
+        artist=artist.strip() or "Desconocido",
+        album=album.strip() or "Desconocido",
+        detected_title=title.strip() or None,
+        track_no=track_no.strip() or None,
+    )
+    return RedirectResponse("/tab/music", status_code=303)
 
 
 # ---------------- Acciones globales ----------------
