@@ -74,6 +74,8 @@ _MIGRATIONS = {
     "album": "TEXT",
     "track_no": "TEXT",
     "dest_folder": "TEXT",
+    "quality": "TEXT",
+    "langs": "TEXT",
 }
 
 

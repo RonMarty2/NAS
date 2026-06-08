@@ -26,6 +26,14 @@
       {% if item["overview"] %}<p class="overview">{{ item["overview"][:220] }}</p>{% endif %}
     {% endif %}
 
+    {% if item["media_type"] != "music" %}
+      <div class="ep-tech">
+        <span class="chip">{{ item['size_bytes']|filesizeformat }}</span>
+        {% if item["quality"] %}<span class="chip">{{ item["quality"] }}</span>{% endif %}
+        {% if item["langs"] %}<span class="chip chip-lang">{{ item["langs"] }}</span>{% endif %}
+      </div>
+    {% endif %}
+
     {% if item["error"] %}<p class="error">⚠️ {{ item["error"] }}</p>{% endif %}
 
     {% if item["status"] == "processing" %}

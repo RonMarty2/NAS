@@ -103,6 +103,12 @@ h1 { font-size: 1.4rem; }
 .ep-actions form { margin: 0; }
 .btn-sm { padding: .25rem .45rem; font-size: .8rem; }
 
+/* Datos técnicos (peso · calidad · idioma) */
+.ep-tech { display: flex; flex-wrap: wrap; gap: .3rem; margin: .25rem 0; }
+.chip { background: var(--panel2); border: 1px solid var(--border); color: var(--muted);
+  font-size: .72rem; padding: .1rem .45rem; border-radius: 6px; white-space: nowrap; }
+.chip-lang { color: var(--primary); border-color: var(--primary); }
+
 .actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .8rem; align-items: center; }
 .actions form { margin: 0; }
 .type-form { display: flex; gap: .3rem; }

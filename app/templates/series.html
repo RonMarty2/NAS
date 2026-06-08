@@ -53,6 +53,11 @@
                   <td class="ep-new">
                     {{ g.title }} S{{ '%02d'|format(ep['season'] or 1) }}E{{ '%02d'|format(ep['episode'] or 1) }}
                     {% if ep['status'] == 'processing' %}<span class="processing"> · ⏳</span>{% endif %}
+                    <div class="ep-tech">
+                      <span class="chip">{{ ep['size_bytes']|filesizeformat }}</span>
+                      {% if ep['quality'] %}<span class="chip">{{ ep['quality'] }}</span>{% endif %}
+                      {% if ep['langs'] %}<span class="chip chip-lang">{{ ep['langs'] }}</span>{% endif %}
+                    </div>
                   </td>
                   <td class="ep-actions">
                     {% if ep['status'] != 'processing' %}

@@ -1,10 +1,44 @@
 """Identificación inicial del archivo: tipo (película/serie/música) y datos básicos
 deducidos del nombre con guessit."""
 import os
+import re
 
 from guessit import guessit
 
 from . import config
+
+# Etiquetas de idioma frecuentes en los nombres (escena en español).
+_LANG_MAP = {
+    "lat": "Latino", "latino": "Latino", "esplat": "Latino",
+    "cast": "Castellano", "castellano": "Castellano", "esp": "Castellano",
+    "español": "Castellano", "espanol": "Castellano", "spa": "Castellano",
+    "ing": "Inglés", "eng": "Inglés", "ingles": "Inglés", "inglés": "Inglés",
+    "english": "Inglés",
+    "dual": "Dual",
+    "sub": "Subtítulos", "subs": "Subtítulos", "subtitulado": "Subtítulos",
+    "vose": "Subtítulos", "vos": "Subtítulos", "subbed": "Subtítulos",
+}
+
+
+def tech_info(filename):
+    """Saca calidad (resolución · fuente · códec) e idiomas del nombre del archivo.
+
+    Devuelve (quality, langs) como textos cortos para mostrar y ayudar a decidir."""
+    info = guessit(filename)
+    parts = []
+    for field in ("screen_size", "source", "video_codec"):
+        val = info.get(field)
+        if val:
+            parts.append(str(val))
+    quality = " · ".join(parts)
+
+    found = []
+    for tok in re.split(r"[^0-9a-záéíóúñ]+", filename.lower()):
+        label = _LANG_MAP.get(tok)
+        if label and label not in found:
+            found.append(label)
+    langs = " · ".join(found)
+    return quality, langs
 
 
 def classify_extension(path):
@@ -49,10 +83,13 @@ def identify(path):
     if isinstance(episode, list):
         episode = episode[0] if episode else None
 
+    quality, langs = tech_info(filename)
     return {
         "media_type": media_type,
         "title": info.get("title"),
         "year": info.get("year"),
         "season": season,
         "episode": episode,
+        "quality": quality,
+        "langs": langs,
     }

@@ -29,6 +29,7 @@ TABS = [
 def _startup():
     db.init_db()
     db.reset_processing()  # recupera movimientos que quedaron a medias
+    watcher.backfill_tech()  # calidad/idioma para items ya existentes
     watcher.start_background()
 
 

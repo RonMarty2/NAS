@@ -47,6 +47,8 @@ def _enrich(item_id, path, ident):
         "detected_year": ident.get("year"),
         "season": ident.get("season"),
         "episode": ident.get("episode"),
+        "quality": ident.get("quality"),
+        "langs": ident.get("langs"),
     }
 
     if media_type in ("movie", "series"):
@@ -112,6 +114,18 @@ def _process_file(path):
     return item_id
 
 
+def backfill_tech():
+    """Rellena calidad/idioma de los pendientes que aún no los tengan (p.ej. items
+    añadidos antes de esta función). Se deduce del nombre, no descarga nada."""
+    for it in db.list_items(status="pending"):
+        if it["media_type"] not in ("movie", "series"):
+            continue
+        if it["quality"] is not None:
+            continue  # ya calculado
+        quality, langs = identify.tech_info(it["filename"])
+        db.update_item(it["id"], quality=quality, langs=langs)
+
+
 def reenrich_pending():
     """Vuelve a buscar metadatos para los pendientes de película/serie que aún no
     tienen coincidencia en TMDB. Útil cuando se acaba de poner la API key: los que
@@ -153,6 +167,8 @@ def scan_once():
             seen += 1
     # Reintenta metadatos de lo que quedó pendiente sin reconocer.
     reenrich_pending()
+    # Rellena calidad/idioma de los que aún no lo tengan.
+    backfill_tech()
     # Avisa si llegaron descargas nuevas para revisar.
     if nuevos:
         plural = "s" if nuevos != 1 else ""
