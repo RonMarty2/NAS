@@ -74,10 +74,15 @@ debe estar en **público** una sola vez: GitHub → tu perfil → Packages → `
 
 > ¿Prefieres compilar desde el código en vez de usar la imagen? Usa `docker-compose.build.yml`.
 
-### 🔄 Actualizar (1 clic)
-Cuando haya una versión nueva (se construye sola al subir cambios a GitHub):
-**Container Manager → Proyecto `nas-organizer` → Acción → Reconstruir**. Bajará la última
-imagen y reiniciará. No hay que descargar ni copiar archivos.
+### 🔄 Actualizar a la última versión
+La imagen se construye sola en GitHub al subir cambios. Para que el NAS la baje
+(Container Manager, proyecto basado en imagen):
+
+1. **Proyecto → `nas-organizer` → Acción → Detener.**
+2. Menú **Imagen** → borra `ghcr.io/ronmarty2/nas-organizer:latest` (la copia vieja).
+3. **Proyecto → `nas-organizer` → Acción → Iniciar** → baja sola la versión nueva.
+
+No hay que descargar ni copiar archivos.
 
 ### 5. Abre la interfaz
 Desde cualquier navegador (PC o móvil en tu red):
