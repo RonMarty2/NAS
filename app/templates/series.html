@@ -58,6 +58,38 @@
           {# ---- Lista expandible de episodios (verificación) ---- #}
           <details class="episodes">
             <summary>👁️ Ver y verificar los {{ g.count }} episodios</summary>
+
+            {% if g.duplicate_groups %}
+              <div class="dup-compare">
+                <h4>Comparación de duplicados</h4>
+                {% for dg in g.duplicate_groups %}
+                  <div class="dup-group">
+                    <div class="dup-group-head">
+                      <strong>{{ dg.target_name }}</strong>
+                      <span>{{ dg.count }} archivos{% if dg.same_size %} · mismo peso{% endif %}</span>
+                    </div>
+                    <div class="dup-candidates">
+                      {% for cand in dg.entries %}
+                        {% set meta = file_meta[cand.id] %}
+                        {% set dup = duplicate_map[cand.id] %}
+                        <div class="dup-candidate">
+                          <div class="dup-candidate-name" title="{{ cand.original_path }}">{{ cand.filename }}</div>
+                          {% set extra_class = "file-facts-compact" %}
+                          {% include "file_facts.html" %}
+                          {% if cand.status != 'processing' and dup.same_size_count > 1 %}
+                            <form method="post" action="/item/{{ cand.id }}/delete-duplicate"
+                                  onsubmit="return confirm('Se calculará SHA-256 completo antes de borrar. Si no es idéntico, no se borrará. ¿Continuar?');">
+                              <button class="btn btn-danger btn-sm" type="submit">Verificar y borrar este</button>
+                            </form>
+                          {% endif %}
+                        </div>
+                      {% endfor %}
+                    </div>
+                  </div>
+                {% endfor %}
+              </div>
+            {% endif %}
+
             <table class="ep-table">
               <thead><tr><th>Archivo original</th><th>Datos</th><th>→ Se renombrará a</th><th></th></tr></thead>
               <tbody>

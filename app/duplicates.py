@@ -58,6 +58,48 @@ def analyze(items):
     return result
 
 
+def comparison_groups(items):
+    """Agrupa duplicados para mostrarlos juntos en la UI."""
+    groups = []
+    by_leaf = {}
+    for item in items:
+        if item["status"] != "pending":
+            continue
+        key = _leaf_key(item)
+        if key:
+            by_leaf.setdefault(key, []).append(item)
+
+    for _key, group in by_leaf.items():
+        if len(group) < 2:
+            continue
+        sizes = {}
+        entries = []
+        for item in group:
+            size = _current_size(item)
+            sizes[size] = sizes.get(size, 0) + 1
+            entries.append({
+                "id": item["id"],
+                "filename": item["filename"],
+                "original_path": item["original_path"],
+                "status": item["status"],
+                "size": size,
+            })
+        try:
+            target = organizer.leaf_path(group[0])
+        except Exception:
+            target = group[0]["filename"]
+        groups.append({
+            "target": target.replace("\\", "/"),
+            "target_name": os.path.splitext(os.path.basename(target))[0],
+            "count": len(group),
+            "same_size": any(count > 1 and size > 0 for size, count in sizes.items()),
+            "entries": entries,
+        })
+
+    groups.sort(key=lambda g: g["target"].lower())
+    return groups
+
+
 def ensure_hash(item, force=False):
     """Calcula SHA-256 solo si hace falta y lo persiste junto al tamaño usado."""
     path = item["original_path"]

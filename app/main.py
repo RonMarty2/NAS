@@ -106,6 +106,7 @@ def tab(request: Request, media_type: str):
         target_map = {}
         for g in groups:
             g["target"] = targets.inspect_many(g["episodes"], g["default_base"])
+            g["duplicate_groups"] = duplicates.comparison_groups(g["episodes"])
             for ep in g["episodes"]:
                 target_map[ep["id"]] = targets.inspect(ep, g["default_base"])
         return templates.TemplateResponse("series.html", {
