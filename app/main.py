@@ -1,5 +1,6 @@
 """Aplicación web (FastAPI) — bandeja de revisión de descargas para Jellyfin."""
 import os
+import threading
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -38,17 +39,25 @@ def index():
 
 @app.get("/tab/{media_type}", response_class=HTMLResponse)
 def tab(request: Request, media_type: str):
-    items = db.list_items(status="pending", media_type=media_type)
-    # Datos para el desplegable de carpeta destino y la vista previa.
-    folder_options = folders.list_candidates()
+    # Mostramos lo pendiente y lo que se está moviendo (para ver el progreso).
+    processing = db.list_items(status="processing", media_type=media_type)
+    pending = db.list_items(status="pending", media_type=media_type)
+    items = processing + pending
     leaves = {it["id"]: organizer.leaf_path(it) for it in items}
     defaults = {it["id"]: (it["dest_folder"] or organizer.default_base(it["media_type"]))
                 for it in items}
     return templates.TemplateResponse("index.html", {
         "request": request, "tabs": TABS, "active": media_type,
         "items": items, "page": "tabs",
-        "folder_options": folder_options, "leaves": leaves, "defaults": defaults,
+        "leaves": leaves, "defaults": defaults,
+        "has_processing": bool(processing),
     })
+
+
+@app.get("/api/folders")
+def api_folders(path: str = ""):
+    """Devuelve las subcarpetas de `path` para el navegador de carpetas (árbol)."""
+    return folders.browse(path)
 
 
 @app.get("/history", response_class=HTMLResponse)
@@ -99,6 +108,21 @@ def _redirect_to_type(media_type):
     return RedirectResponse(f"/tab/{media_type}", status_code=303)
 
 
+def _do_move(item_id):
+    """Mueve el archivo en segundo plano (puede tardar si hay que copiar GB) y
+    actualiza el estado al terminar. Así la web no se queda congelada."""
+    item = db.get_item(item_id)
+    if not item:
+        return
+    ok, dest, message = organizer.move_item(item)
+    if ok:
+        db.update_item(item_id, status="done", dest_path=dest,
+                       processed_at=_now(), error=None)
+        jellyfin.refresh_incremental()  # escaneo incremental (solo nuevos)
+    else:
+        db.update_item(item_id, status="error", error=message)
+
+
 @app.post("/item/{item_id}/confirm")
 def confirm(item_id: int, dest_folder: str = Form(""), new_subfolder: str = Form("")):
     item = db.get_item(item_id)
@@ -112,16 +136,10 @@ def confirm(item_id: int, dest_folder: str = Form(""), new_subfolder: str = Form
         db.update_item(item_id, status="error",
                        error="La carpeta destino está fuera de las rutas permitidas.")
         return _redirect_to_type(item["media_type"])
-    db.update_item(item_id, dest_folder=target)
-    item = db.get_item(item_id)
 
-    ok, dest, message = organizer.move_item(item)
-    if ok:
-        db.update_item(item_id, status="done", dest_path=dest,
-                       processed_at=_now(), error=None)
-        jellyfin.refresh_incremental()  # escaneo incremental (solo nuevos)
-    else:
-        db.update_item(item_id, status="error", error=message)
+    # Marcamos como "procesando" y movemos en segundo plano (no bloquea la página).
+    db.update_item(item_id, dest_folder=target, status="processing", error=None)
+    threading.Thread(target=_do_move, args=(item_id,), daemon=True).start()
     return _redirect_to_type(item["media_type"])
 
 

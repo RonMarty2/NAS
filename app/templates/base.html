@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NAS Organizer</title>
+  {% if has_processing %}<meta http-equiv="refresh" content="6">{% endif %}
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -29,16 +30,87 @@
     <small>Vigila tus descargas y las organiza para Jellyfin · acceso: http://IP-DE-TU-NAS:8678</small>
   </footer>
 
+  {# ---- Navegador de carpetas (árbol expandible) ---- #}
+  <div id="folderModal" class="modal hidden">
+    <div class="modal-box">
+      <h3>📂 Elegir carpeta destino</h3>
+      <div id="fm-roots" class="fm-roots"></div>
+      <p class="fm-current">Estás en: <strong id="fm-path"></strong></p>
+      <div id="fm-list" class="fm-list"></div>
+      <input id="fm-newsub" class="fm-newsub" placeholder="o escribe el nombre de una carpeta NUEVA (opcional)">
+      <div class="fm-actions">
+        <button class="btn btn-ghost" type="button" onclick="closeFolderPicker()">Cancelar</button>
+        <button class="btn btn-primary" type="button" onclick="chooseFolder()">✅ Usar esta carpeta</button>
+      </div>
+    </div>
+  </div>
+
   <script>
-    // Actualiza la vista previa de la ruta final al cambiar la carpeta o la subcarpeta.
-    function updatePreview(sel) {
-      if (!sel) return;
-      var leaf = sel.getAttribute('data-leaf') || '';
-      var span = document.getElementById(sel.getAttribute('data-preview'));
-      var subInput = sel.form.querySelector('input[name="new_subfolder"]');
-      var sub = subInput ? subInput.value.trim().replace(/^\/+|\/+$/g, '') : '';
-      var path = sel.value + (sub ? '/' + sub : '') + '/' + leaf;
-      if (span) span.textContent = path;
+    var fmItem = null, fmPath = "";
+
+    function openFolderPicker(itemId, startPath) {
+      fmItem = itemId;
+      document.getElementById("fm-newsub").value = "";
+      document.getElementById("folderModal").classList.remove("hidden");
+      navTo(startPath || "");
+    }
+    function closeFolderPicker() {
+      document.getElementById("folderModal").classList.add("hidden");
+    }
+    function navTo(path) {
+      fetch("/api/folders?path=" + encodeURIComponent(path))
+        .then(function (r) { return r.json(); })
+        .then(renderFolders);
+    }
+    function renderFolders(data) {
+      fmPath = data.path;
+      document.getElementById("fm-path").textContent = data.path;
+
+      // Raíces (cambiar entre /video y /music, etc.)
+      var roots = document.getElementById("fm-roots");
+      roots.innerHTML = "";
+      data.roots.forEach(function (r) {
+        var b = document.createElement("button");
+        b.type = "button"; b.className = "btn btn-ghost fm-root";
+        b.textContent = "📁 " + r.name;
+        b.onclick = function () { navTo(r.path); };
+        roots.appendChild(b);
+      });
+
+      var list = document.getElementById("fm-list");
+      list.innerHTML = "";
+      if (data.parent !== null && data.parent !== undefined) {
+        var up = document.createElement("div");
+        up.className = "fm-item fm-up";
+        up.textContent = "⬆️  .. (subir un nivel)";
+        up.onclick = function () { navTo(data.parent); };
+        list.appendChild(up);
+      }
+      if (data.items.length === 0) {
+        var empty = document.createElement("div");
+        empty.className = "fm-empty";
+        empty.textContent = "(esta carpeta no tiene subcarpetas)";
+        list.appendChild(empty);
+      }
+      data.items.forEach(function (f) {
+        var row = document.createElement("div");
+        row.className = "fm-item";
+        row.textContent = (f.has_children ? "📂 " : "📁 ") + f.name;
+        row.onclick = function () { navTo(f.path); };
+        list.appendChild(row);
+      });
+    }
+    function chooseFolder() {
+      if (fmItem === null) return;
+      var sub = document.getElementById("fm-newsub").value.trim().replace(/^\/+|\/+$/g, "");
+      var path = fmPath + (sub ? "/" + sub : "");
+      document.getElementById("dest-" + fmItem).value = path;
+      document.getElementById("chosen-" + fmItem).textContent = path;
+      var cont = document.querySelector('.dest-form[data-item="' + fmItem + '"]');
+      var leaf = cont ? cont.getAttribute("data-leaf") : "";
+      var prev = document.getElementById("prev-" + fmItem);
+      if (prev) prev.textContent = path + "/" + leaf;
+      closeFolderPicker();
     }
   </script>
 </body>

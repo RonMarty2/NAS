@@ -6,15 +6,15 @@ from . import db
 
 # Claves de configuración y su variable de entorno por defecto.
 DEFAULTS = {
-    # Carpeta donde JDownloader deja las descargas (ruta DENTRO del contenedor).
-    "downloads_dir": os.environ.get("NAS_DOWNLOADS_DIR", "/downloads"),
+    # Carpeta donde JDownloader deja las descargas.
+    "downloads_dir": os.environ.get("NAS_DOWNLOADS_DIR", "/volume1/homes/rnd261190/jdownloader"),
     # Raíces de biblioteca que el programa puede mostrar y donde puede mover.
-    # Separadas por comas. Son las carpetas "base" que verás en el desplegable.
-    "library_roots": os.environ.get("NAS_LIBRARY_ROOTS", "/video,/music"),
-    # Carpetas sugeridas por defecto (se preseleccionan en el desplegable).
-    "default_movie_dir":  os.environ.get("NAS_DEFAULT_MOVIE_DIR", "/video/peliculas"),
-    "default_series_dir": os.environ.get("NAS_DEFAULT_SERIES_DIR", "/video/series"),
-    "default_music_dir":  os.environ.get("NAS_DEFAULT_MUSIC_DIR", "/music"),
+    # Separadas por comas. Son las carpetas "base" del navegador de carpetas.
+    "library_roots": os.environ.get("NAS_LIBRARY_ROOTS", "/volume1/video,/volume1/music"),
+    # Carpetas sugeridas por defecto (se preseleccionan al elegir destino).
+    "default_movie_dir":  os.environ.get("NAS_DEFAULT_MOVIE_DIR", "/volume1/video/peliculas"),
+    "default_series_dir": os.environ.get("NAS_DEFAULT_SERIES_DIR", "/volume1/video/series"),
+    "default_music_dir":  os.environ.get("NAS_DEFAULT_MUSIC_DIR", "/volume1/music"),
     # Claves y Jellyfin
     "tmdb_api_key":     os.environ.get("TMDB_API_KEY", ""),
     "jellyfin_url":     os.environ.get("JELLYFIN_URL", ""),

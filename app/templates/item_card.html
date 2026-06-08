@@ -28,30 +28,27 @@
 
     {% if item["error"] %}<p class="error">⚠️ {{ item["error"] }}</p>{% endif %}
 
+    {% if item["status"] == "processing" %}
+      {# ---- En movimiento: nada que tocar, solo mostrar progreso ---- #}
+      <p class="processing">⏳ Moviendo… <small>(si es un archivo grande puede tardar unos minutos; la página se actualiza sola)</small></p>
+      <p class="preview">Destino: <span>{{ item["dest_folder"] }}/{{ leaves[item['id']] }}</span></p>
+    {% else %}
     {# ---- Selector de carpeta destino + vista previa ---- #}
     {% set leaf = leaves[item['id']] %}
     {% set base_def = defaults[item['id']] %}
-    <form method="post" action="/item/{{ item['id'] }}/confirm" class="dest-form">
+    <div class="dest-form" data-item="{{ item['id'] }}" data-leaf="{{ leaf }}">
       <div class="dest-row">
-        <label>📁 Mover a:
-          <select name="dest_folder" data-leaf="{{ leaf }}" data-preview="prev-{{ item['id'] }}"
-                  onchange="updatePreview(this)">
-            {% for f in folder_options %}
-              <option value="{{ f['path'] }}" {{ 'selected' if f['path'] == base_def else '' }}>
-                {{ '— ' * f['depth'] }}{{ f['label'] }}
-              </option>
-            {% endfor %}
-            {% if not folder_options %}
-              <option value="{{ base_def }}" selected>{{ base_def }}</option>
-            {% endif %}
-          </select>
-        </label>
-        <input type="text" name="new_subfolder" placeholder="o crear subcarpeta (opcional)"
-               oninput="updatePreview(this.form.dest_folder)">
+        <span>📁 Mover a:</span>
+        <strong class="chosen-folder" id="chosen-{{ item['id'] }}">{{ base_def }}</strong>
+        <button type="button" class="btn btn-secondary"
+                onclick="openFolderPicker({{ item['id'] }}, '{{ base_def }}')">📂 Elegir carpeta…</button>
       </div>
       <p class="preview">Quedará en: <span id="prev-{{ item['id'] }}">{{ base_def }}/{{ leaf }}</span></p>
-      <button class="btn btn-primary" type="submit">✅ Confirmar y mover</button>
-    </form>
+      <form method="post" action="/item/{{ item['id'] }}/confirm">
+        <input type="hidden" name="dest_folder" id="dest-{{ item['id'] }}" value="{{ base_def }}">
+        <button class="btn btn-primary" type="submit">✅ Confirmar y mover</button>
+      </form>
+    </div>
 
     <div class="actions">
       {% if item["media_type"] in ("movie", "series") %}
@@ -77,5 +74,6 @@
         <button class="btn btn-danger" type="submit">🗑️ Eliminar</button>
       </form>
     </div>
+    {% endif %}
   </div>
 </div>

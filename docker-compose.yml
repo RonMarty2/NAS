@@ -9,14 +9,15 @@ services:
       - "8678:8678"
     environment:
       # --- Valores iniciales (luego se pueden editar desde la pestaña Ajustes) ---
-      # Rutas DENTRO del contenedor (no las del NAS). Se mapean en "volumes".
-      - NAS_DOWNLOADS_DIR=/downloads
-      # Raíces que verás en el desplegable para elegir dónde mover cada archivo.
-      - NAS_LIBRARY_ROOTS=/video,/music
+      # Usamos las MISMAS rutas que en el NAS (gracias a montar /volume1 entero).
+      # Así los movimientos son INSTANTÁNEOS (no copia) y las rutas se ven igual.
+      - NAS_DOWNLOADS_DIR=/volume1/homes/rnd261190/jdownloader
+      # Raíces que verás en el navegador de carpetas al elegir destino.
+      - NAS_LIBRARY_ROOTS=/volume1/video,/volume1/music
       # Carpetas preseleccionadas por defecto (puedes elegir otra en cada descarga).
-      - NAS_DEFAULT_MOVIE_DIR=/video/peliculas
-      - NAS_DEFAULT_SERIES_DIR=/video/series
-      - NAS_DEFAULT_MUSIC_DIR=/music
+      - NAS_DEFAULT_MOVIE_DIR=/volume1/video/peliculas
+      - NAS_DEFAULT_SERIES_DIR=/volume1/video/series
+      - NAS_DEFAULT_MUSIC_DIR=/volume1/music
       # Claves y Jellyfin (opcionales aquí, también se configuran en la web)
       - TMDB_API_KEY=${TMDB_API_KEY:-}
       - JELLYFIN_URL=${JELLYFIN_URL:-}
@@ -24,10 +25,8 @@ services:
       - METADATA_LANGUAGE=es-ES
       - TZ=America/Mexico_City
     volumes:
-      # IZQUIERDA = ruta real en tu NAS Synology. DERECHA = ruta dentro del contenedor.
-      # Ajusta SOLO la parte izquierda si tus carpetas son distintas.
-      - /volume1/homes/rnd261190/jdownloader:/downloads   # donde descarga JDownloader
-      - /volume1/video:/video                             # biblioteca de vídeo (peliculas, series…)
-      - /volume1/music:/music                             # biblioteca de música
+      # Montamos todo /volume1 con la misma ruta dentro del contenedor. Esto hace que
+      # mover de descargas a la biblioteca sea instantáneo (no copia gigabytes).
+      - /volume1:/volume1
       # Datos persistentes de la app (base de datos). No lo borres.
       - ./data:/data

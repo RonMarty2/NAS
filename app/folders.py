@@ -78,3 +78,47 @@ def ensure_folder(base, new_sub=""):
     except OSError:
         return None
     return target
+
+
+def browse(path=""):
+    """Navegación por carpetas para el árbol del navegador web.
+
+    Devuelve la carpeta actual, su carpeta padre (si sigue dentro de las raíces),
+    las raíces disponibles y las subcarpetas inmediatas. Permite un navegador
+    expandible/contraíble en lugar de un desplegable gigante.
+    """
+    rts = roots()
+    roots_entries = [{"name": os.path.basename(r) or r, "path": r} for r in rts]
+
+    # Si la ruta no es válida, arrancamos en la primera raíz.
+    if not path or not within_roots(path) or not os.path.isdir(path):
+        path = rts[0] if rts else ""
+
+    parent = None
+    if path:
+        rp = os.path.realpath(path)
+        is_root = any(os.path.realpath(r) == rp for r in rts)
+        if not is_root:
+            cand = os.path.dirname(path)
+            if within_roots(cand):
+                parent = cand
+
+    items = []
+    if path and os.path.isdir(path):
+        try:
+            for e in sorted(os.listdir(path), key=str.lower):
+                p = os.path.join(path, e)
+                if os.path.isdir(p) and not e.startswith("."):
+                    has_children = False
+                    try:
+                        has_children = any(
+                            os.path.isdir(os.path.join(p, x)) and not x.startswith(".")
+                            for x in os.listdir(p)
+                        )
+                    except OSError:
+                        pass
+                    items.append({"name": e, "path": p, "has_children": has_children})
+        except OSError:
+            pass
+
+    return {"path": path, "parent": parent, "roots": roots_entries, "items": items}
