@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import config, db, jellyfin, organizer, watcher
+from . import config, db, folders, jellyfin, organizer, watcher
 from .metadata import music as music_meta
 from .metadata import tmdb
 
@@ -39,9 +39,15 @@ def index():
 @app.get("/tab/{media_type}", response_class=HTMLResponse)
 def tab(request: Request, media_type: str):
     items = db.list_items(status="pending", media_type=media_type)
+    # Datos para el desplegable de carpeta destino y la vista previa.
+    folder_options = folders.list_candidates()
+    leaves = {it["id"]: organizer.leaf_path(it) for it in items}
+    defaults = {it["id"]: (it["dest_folder"] or organizer.default_base(it["media_type"]))
+                for it in items}
     return templates.TemplateResponse("index.html", {
         "request": request, "tabs": TABS, "active": media_type,
         "items": items, "page": "tabs",
+        "folder_options": folder_options, "leaves": leaves, "defaults": defaults,
     })
 
 
@@ -66,15 +72,17 @@ def settings_page(request: Request, saved: bool = False, msg: str = ""):
 
 @app.post("/settings")
 def settings_save(
-    downloads_dir: str = Form(""), movies_dir: str = Form(""),
-    series_dir: str = Form(""), music_dir: str = Form(""),
+    downloads_dir: str = Form(""), library_roots: str = Form(""),
+    default_movie_dir: str = Form(""), default_series_dir: str = Form(""),
+    default_music_dir: str = Form(""),
     tmdb_api_key: str = Form(""), jellyfin_url: str = Form(""),
     jellyfin_api_key: str = Form(""), metadata_language: str = Form("es-ES"),
     min_size_mb: str = Form("10"),
 ):
     for key, val in {
-        "downloads_dir": downloads_dir, "movies_dir": movies_dir,
-        "series_dir": series_dir, "music_dir": music_dir,
+        "downloads_dir": downloads_dir, "library_roots": library_roots,
+        "default_movie_dir": default_movie_dir, "default_series_dir": default_series_dir,
+        "default_music_dir": default_music_dir,
         "tmdb_api_key": tmdb_api_key, "jellyfin_url": jellyfin_url,
         "jellyfin_api_key": jellyfin_api_key, "metadata_language": metadata_language,
         "min_size_mb": min_size_mb,
@@ -92,10 +100,21 @@ def _redirect_to_type(media_type):
 
 
 @app.post("/item/{item_id}/confirm")
-def confirm(item_id: int):
+def confirm(item_id: int, dest_folder: str = Form(""), new_subfolder: str = Form("")):
     item = db.get_item(item_id)
     if not item:
         return RedirectResponse("/", status_code=303)
+
+    # Carpeta base elegida por el usuario (o la sugerida por defecto).
+    base = dest_folder.strip() or organizer.default_base(item["media_type"])
+    target = folders.ensure_folder(base, new_subfolder)
+    if target is None:
+        db.update_item(item_id, status="error",
+                       error="La carpeta destino está fuera de las rutas permitidas.")
+        return _redirect_to_type(item["media_type"])
+    db.update_item(item_id, dest_folder=target)
+    item = db.get_item(item_id)
+
     ok, dest, message = organizer.move_item(item)
     if ok:
         db.update_item(item_id, status="done", dest_path=dest,

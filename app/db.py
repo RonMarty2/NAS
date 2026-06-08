@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS items (
     artist         TEXT,
     album          TEXT,
     track_no       TEXT,
+    dest_folder    TEXT,            -- carpeta base elegida por el usuario
     dest_path      TEXT,
     error          TEXT,
     created_at     TEXT DEFAULT (datetime('now')),
@@ -65,6 +66,7 @@ _MIGRATIONS = {
     "artist": "TEXT",
     "album": "TEXT",
     "track_no": "TEXT",
+    "dest_folder": "TEXT",
 }
 
 

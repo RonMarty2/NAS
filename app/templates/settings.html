@@ -9,12 +9,15 @@
       <legend>Carpetas (rutas dentro del contenedor)</legend>
       <label>Carpeta de descargas
         <input type="text" name="downloads_dir" value="{{ cfg['downloads_dir'] }}"></label>
-      <label>Carpeta de Películas
-        <input type="text" name="movies_dir" value="{{ cfg['movies_dir'] }}"></label>
-      <label>Carpeta de Series
-        <input type="text" name="series_dir" value="{{ cfg['series_dir'] }}"></label>
-      <label>Carpeta de Música
-        <input type="text" name="music_dir" value="{{ cfg['music_dir'] }}"></label>
+      <label>Raíces de biblioteca (separadas por comas) — son las que aparecen en el desplegable
+        <input type="text" name="library_roots" value="{{ cfg['library_roots'] }}"
+               placeholder="/video,/music"></label>
+      <label>Carpeta sugerida por defecto para Películas
+        <input type="text" name="default_movie_dir" value="{{ cfg['default_movie_dir'] }}"></label>
+      <label>Carpeta sugerida por defecto para Series
+        <input type="text" name="default_series_dir" value="{{ cfg['default_series_dir'] }}"></label>
+      <label>Carpeta sugerida por defecto para Música
+        <input type="text" name="default_music_dir" value="{{ cfg['default_music_dir'] }}"></label>
     </fieldset>
 
     <fieldset>

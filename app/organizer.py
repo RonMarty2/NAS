@@ -22,11 +22,14 @@ def _two(n):
         return "01"
 
 
-def build_dest(item):
-    """Calcula la ruta destino completa según el tipo de medio y los datos elegidos.
+def default_base(media_type):
+    """Carpeta base sugerida por defecto para un tipo de medio."""
+    return config.default_dir_for(media_type)
 
-    `item` es una fila de la BD (sqlite3.Row) o un dict.
-    Devuelve la ruta absoluta destino (incluido el nombre de archivo).
+
+def leaf_path(item):
+    """Estructura interna (subcarpetas + nombre de archivo) que se crea DENTRO de la
+    carpeta base elegida. No incluye la base. Sirve también para la vista previa.
     """
     g = item.__getitem__ if hasattr(item, "__getitem__") else item.get
     media_type = g("media_type")
@@ -36,34 +39,37 @@ def build_dest(item):
         title = safe_name(g("chosen_title") or g("detected_title"))
         year = g("chosen_year") or g("detected_year")
         folder_name = f"{title} ({year})" if year else title
-        base = os.path.join(config.get("movies_dir"), folder_name)
-        fname = folder_name + ext
-        return os.path.join(base, fname)
+        return os.path.join(folder_name, folder_name + ext)
 
     if media_type == "series":
         title = safe_name(g("chosen_title") or g("detected_title"))
         season = _two(g("season"))
         episode = _two(g("episode"))
-        base = os.path.join(config.get("series_dir"), title, f"Season {season}")
-        fname = f"{title} S{season}E{episode}{ext}"
-        return os.path.join(base, fname)
+        return os.path.join(title, f"Season {season}", f"{title} S{season}E{episode}{ext}")
 
     if media_type == "music":
         artist = safe_name(g("artist") or "Desconocido")
         album = safe_name(g("album") or "Desconocido")
         title = safe_name(g("detected_title") or os.path.splitext(g("filename"))[0])
-        # El nº de pista es opcional: si no lo hay, no anteponemos "NN - ".
         track_raw = g("track_no")
         if track_raw not in (None, ""):
             fname = f"{_two(track_raw)} - {title}{ext}"
         else:
             fname = f"{title}{ext}"
-        base = os.path.join(config.get("music_dir"), artist, album)
-        return os.path.join(base, fname)
+        return os.path.join(artist, album, fname)
 
-    # Desconocido: lo dejamos en una subcarpeta "Sin clasificar" dentro de películas
-    base = os.path.join(config.get("movies_dir"), "Sin clasificar")
-    return os.path.join(base, safe_name(g("filename")))
+    # Desconocido: se deja con su nombre original
+    return safe_name(g("filename"))
+
+
+def build_dest(item):
+    """Ruta destino completa = carpeta base elegida (o la por defecto) + leaf_path.
+
+    `item` es una fila de la BD (sqlite3.Row) o un dict.
+    """
+    g = item.__getitem__ if hasattr(item, "__getitem__") else item.get
+    base = g("dest_folder") or default_base(g("media_type"))
+    return os.path.join(base, leaf_path(item))
 
 
 def _find_subtitles(original_path):

@@ -28,11 +28,32 @@
 
     {% if item["error"] %}<p class="error">⚠️ {{ item["error"] }}</p>{% endif %}
 
-    <div class="actions">
-      <form method="post" action="/item/{{ item['id'] }}/confirm">
-        <button class="btn btn-primary" type="submit">✅ Confirmar y mover</button>
-      </form>
+    {# ---- Selector de carpeta destino + vista previa ---- #}
+    {% set leaf = leaves[item['id']] %}
+    {% set base_def = defaults[item['id']] %}
+    <form method="post" action="/item/{{ item['id'] }}/confirm" class="dest-form">
+      <div class="dest-row">
+        <label>📁 Mover a:
+          <select name="dest_folder" data-leaf="{{ leaf }}" data-preview="prev-{{ item['id'] }}"
+                  onchange="updatePreview(this)">
+            {% for f in folder_options %}
+              <option value="{{ f['path'] }}" {{ 'selected' if f['path'] == base_def else '' }}>
+                {{ '— ' * f['depth'] }}{{ f['label'] }}
+              </option>
+            {% endfor %}
+            {% if not folder_options %}
+              <option value="{{ base_def }}" selected>{{ base_def }}</option>
+            {% endif %}
+          </select>
+        </label>
+        <input type="text" name="new_subfolder" placeholder="o crear subcarpeta (opcional)"
+               oninput="updatePreview(this.form.dest_folder)">
+      </div>
+      <p class="preview">Quedará en: <span id="prev-{{ item['id'] }}">{{ base_def }}/{{ leaf }}</span></p>
+      <button class="btn btn-primary" type="submit">✅ Confirmar y mover</button>
+    </form>
 
+    <div class="actions">
       {% if item["media_type"] in ("movie", "series") %}
         <a class="btn btn-secondary" href="/item/{{ item['id'] }}/search?q={{ (item['chosen_title'] or item['detected_title'] or '')|urlencode }}">✏️ Editar / buscar</a>
       {% else %}

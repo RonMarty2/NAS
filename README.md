@@ -22,10 +22,13 @@ de Jellyfin y Jellyfin se actualiza solo.
 - 🗂️ Pestañas separadas: **Películas · Series · Música**.
 - ✅ Tú **confirmas con un clic**; también puedes **Editar** (buscar el título correcto),
   **Cambiar tipo**, **Omitir** o **Eliminar**.
-- 📁 **Renombra y mueve** con la estructura que Jellyfin entiende:
-  - Películas → `Películas/Título (Año)/Título (Año).mkv`
-  - Series → `Series/Título/Season 01/Título S01E02.mkv`
-  - Música → `Música/Artista/Álbum/01 - Canción.mp3`
+- 📁 **Tú eliges la carpeta destino** en un desplegable con tus carpetas reales (y puedes
+  **crear una subcarpeta nueva** al vuelo), con **vista previa** de la ruta final.
+- 🏷️ **Renombra y mueve** con la estructura que Jellyfin entiende dentro de la carpeta que
+  elijas:
+  - Películas → `…/Título (Año)/Título (Año).mkv`
+  - Series → `…/Título/Season 01/Título S01E02.mkv`
+  - Música → `…/Artista/Álbum/01 - Canción.mp3`
   - Arrastra los **subtítulos** junto al vídeo.
 - 🔄 **Refresca Jellyfin** automáticamente (escaneo incremental) tras cada movimiento, con
   un botón aparte para **Actualizar todo** cuando lo necesites.
@@ -49,15 +52,16 @@ Edita **solo la parte izquierda** de `volumes` para que apunte a tus carpetas re
 
 ```yaml
     volumes:
-      - /volume1/downloads:/downloads      # carpeta donde descarga JDownloader
-      - /volume1/media:/media              # raíz de tu biblioteca de Jellyfin
-      - ./data:/data                       # datos de la app (no borrar)
+      - /volume1/homes/rnd261190/jdownloader:/downloads   # donde descarga JDownloader
+      - /volume1/video:/video                             # biblioteca de vídeo
+      - /volume1/music:/music                             # biblioteca de música
+      - ./data:/data                                      # datos de la app (no borrar)
 ```
 
-> Dentro del contenedor, las películas irán a `/media/Películas`, las series a
-> `/media/Series` y la música a `/media/Música`. Puedes cambiar estos nombres en
-> **Ajustes**. Asegúrate de que coincidan con las carpetas que Jellyfin ya tiene
-> configuradas como bibliotecas.
+> Dentro del contenedor, tus bibliotecas se ven como `/video` y `/music`. En la web, al
+> confirmar cada descarga, **eliges en un desplegable** a qué carpeta moverla (por ejemplo
+> `/video/peliculas`, `/video/series`, o una nueva). Esas carpetas (`library_roots`) y las
+> sugeridas por defecto se pueden cambiar en **Ajustes**.
 
 ### 4. Levanta el contenedor
 Por terminal (SSH):

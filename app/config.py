@@ -6,10 +6,16 @@ from . import db
 
 # Claves de configuración y su variable de entorno por defecto.
 DEFAULTS = {
-    "downloads_dir":    os.environ.get("NAS_DOWNLOADS_DIR", "/downloads"),
-    "movies_dir":       os.environ.get("NAS_MOVIES_DIR", "/media/Películas"),
-    "series_dir":       os.environ.get("NAS_SERIES_DIR", "/media/Series"),
-    "music_dir":        os.environ.get("NAS_MUSIC_DIR", "/media/Música"),
+    # Carpeta donde JDownloader deja las descargas (ruta DENTRO del contenedor).
+    "downloads_dir": os.environ.get("NAS_DOWNLOADS_DIR", "/downloads"),
+    # Raíces de biblioteca que el programa puede mostrar y donde puede mover.
+    # Separadas por comas. Son las carpetas "base" que verás en el desplegable.
+    "library_roots": os.environ.get("NAS_LIBRARY_ROOTS", "/video,/music"),
+    # Carpetas sugeridas por defecto (se preseleccionan en el desplegable).
+    "default_movie_dir":  os.environ.get("NAS_DEFAULT_MOVIE_DIR", "/video/peliculas"),
+    "default_series_dir": os.environ.get("NAS_DEFAULT_SERIES_DIR", "/video/series"),
+    "default_music_dir":  os.environ.get("NAS_DEFAULT_MUSIC_DIR", "/music"),
+    # Claves y Jellyfin
     "tmdb_api_key":     os.environ.get("TMDB_API_KEY", ""),
     "jellyfin_url":     os.environ.get("JELLYFIN_URL", ""),
     "jellyfin_api_key": os.environ.get("JELLYFIN_API_KEY", ""),
@@ -41,3 +47,12 @@ def as_dict():
 def ext_list(key):
     """Devuelve un set de extensiones en minúsculas a partir de una clave de config."""
     return {e.strip().lower() for e in get(key).split(",") if e.strip()}
+
+
+def default_dir_for(media_type):
+    """Carpeta sugerida por defecto según el tipo de medio."""
+    return {
+        "movie":  get("default_movie_dir"),
+        "series": get("default_series_dir"),
+        "music":  get("default_music_dir"),
+    }.get(media_type, get("default_movie_dir"))

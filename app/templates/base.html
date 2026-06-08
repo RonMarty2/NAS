@@ -28,5 +28,18 @@
   <footer>
     <small>Vigila tus descargas y las organiza para Jellyfin · acceso: http://IP-DE-TU-NAS:8678</small>
   </footer>
+
+  <script>
+    // Actualiza la vista previa de la ruta final al cambiar la carpeta o la subcarpeta.
+    function updatePreview(sel) {
+      if (!sel) return;
+      var leaf = sel.getAttribute('data-leaf') || '';
+      var span = document.getElementById(sel.getAttribute('data-preview'));
+      var subInput = sel.form.querySelector('input[name="new_subfolder"]');
+      var sub = subInput ? subInput.value.trim().replace(/^\/+|\/+$/g, '') : '';
+      var path = sel.value + (sub ? '/' + sub : '') + '/' + leaf;
+      if (span) span.textContent = path;
+    }
+  </script>
 </body>
 </html>
