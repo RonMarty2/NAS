@@ -25,15 +25,29 @@
           {% endif %}
 
           {# ---- Carpeta destino para toda la serie ---- #}
-          <div class="dest-form" data-item="{{ g.gid }}" data-leaf="{{ g.title }}/Season XX/…">
+          <div class="dest-form" data-item="{{ g.gid }}" data-leaf="{{ g.title }}/Season XX/…"
+               data-check-ids="{% for ep in g.episodes %}{{ ep['id'] }}{{ ',' if not loop.last else '' }}{% endfor %}">
             <div class="dest-row">
               <span>📁 Mover a:</span>
               <strong class="chosen-folder" id="chosen-{{ g.gid }}">{{ g.default_base }}</strong>
               <button type="button" class="btn btn-secondary"
-                      onclick="openFolderPicker('{{ g.gid }}', '{{ g.default_base }}')">📂 Elegir carpeta…</button>
+                      onclick="openFolderPicker({{ g.gid|tojson }}, {{ g.default_base|tojson }})">📂 Elegir carpeta…</button>
             </div>
             <p class="preview">Se guardarán en:
               <span id="prev-{{ g.gid }}">{{ g.default_base }}/{{ g.title }}/Season …</span></p>
+            <div class="target-notice target-check" id="target-check-{{ g.gid }}">
+              {% if g.target.exact_count %}
+                <div class="target-warning target-warning-strong">
+                  <strong>Ya existe en destino</strong>
+                  <span>{{ g.target.exact_count }} episodio{{ 's' if g.target.exact_count != 1 else '' }} ya tiene{{ 'n' if g.target.exact_count != 1 else '' }} archivo final en la biblioteca.</span>
+                </div>
+              {% elif g.target.folder_count %}
+                <div class="target-warning">
+                  <strong>Ya hay contenido en esa carpeta</strong>
+                  <span>{{ g.target.folder_count }} destino{{ 's' if g.target.folder_count != 1 else '' }} tiene{{ 'n' if g.target.folder_count != 1 else '' }} archivos de medios.</span>
+                </div>
+              {% endif %}
+            </div>
             <form method="post" action="/series/confirm-all">
               {% for ep in g.episodes %}<input type="hidden" name="ids" value="{{ ep['id'] }}">{% endfor %}
               <input type="hidden" name="dest_folder" id="dest-{{ g.gid }}" value="{{ g.default_base }}">
@@ -45,11 +59,28 @@
           <details class="episodes">
             <summary>👁️ Ver y verificar los {{ g.count }} episodios</summary>
             <table class="ep-table">
-              <thead><tr><th>Archivo original</th><th>→ Se renombrará a</th><th></th></tr></thead>
+              <thead><tr><th>Archivo original</th><th>Datos</th><th>→ Se renombrará a</th><th></th></tr></thead>
               <tbody>
               {% for ep in g.episodes %}
+                {% set meta = file_meta[ep['id']] %}
+                {% set dup = duplicate_map[ep['id']] %}
+                {% set target = target_map[ep['id']] %}
                 <tr>
                   <td class="ep-orig" title="{{ ep['original_path'] }}">{{ ep['filename'] }}</td>
+                  <td class="ep-data">
+                    {% set extra_class = "file-facts-compact" %}
+                    {% include "file_facts.html" %}
+                    {% if dup.exact_count > 1 %}
+                      <div class="ep-dup ep-dup-exact">Idéntico · SHA {{ dup.hash_short }}</div>
+                    {% elif dup.same_size_count > 1 %}
+                      <div class="ep-dup ep-dup-exact">Mismo peso · verifica SHA al borrar</div>
+                    {% elif dup.similar_count > 1 %}
+                      <div class="ep-dup ep-dup-possible">Posible duplicado</div>
+                    {% endif %}
+                    {% if target.exact_exists %}
+                      <div class="ep-dup ep-target-exists">Ya existe en destino</div>
+                    {% endif %}
+                  </td>
                   <td class="ep-new">
                     {{ g.title }} S{{ '%02d'|format(ep['season'] or 1) }}E{{ '%02d'|format(ep['episode'] or 1) }}
                     {% if ep['status'] == 'processing' %}<span class="processing"> · ⏳</span>{% endif %}
@@ -57,9 +88,15 @@
                   <td class="ep-actions">
                     {% if ep['status'] != 'processing' %}
                       <form method="post" action="/item/{{ ep['id'] }}/skip"><button class="btn btn-ghost btn-sm">⏭️</button></form>
-                      <form method="post" action="/item/{{ ep['id'] }}/delete"
-                            onsubmit="return confirm('¿Borrar este archivo del disco?');">
-                        <button class="btn btn-danger btn-sm">🗑️</button></form>
+                      {% if dup.exact_count > 1 or dup.same_size_count > 1 %}
+                        <form method="post" action="/item/{{ ep['id'] }}/delete-duplicate"
+                              onsubmit="return confirm('Se calculará SHA-256 completo antes de borrar. Si no es idéntico, no se borrará. ¿Continuar?');">
+                          <button class="btn btn-danger btn-sm" title="Verificar y borrar duplicado exacto">🗑️</button></form>
+                      {% else %}
+                        <form method="post" action="/item/{{ ep['id'] }}/delete"
+                              onsubmit="return confirm('¿Borrar este archivo del disco?');">
+                          <button class="btn btn-danger btn-sm">🗑️</button></form>
+                      {% endif %}
                     {% endif %}
                   </td>
                 </tr>

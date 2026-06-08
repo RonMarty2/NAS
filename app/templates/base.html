@@ -123,7 +123,20 @@
       var leaf = cont ? cont.getAttribute("data-leaf") : "";
       var prev = document.getElementById("prev-" + fmItem);
       if (prev) prev.textContent = path + "/" + leaf;
+      refreshTargetCheck(fmItem, path);
       closeFolderPicker();
+    }
+    function refreshTargetCheck(itemId, path) {
+      var cont = document.querySelector('.dest-form[data-item="' + itemId + '"]');
+      if (!cont) return;
+      var ids = cont.getAttribute("data-check-ids") || "";
+      var box = document.getElementById("target-check-" + itemId);
+      if (!ids || !box) return;
+      box.innerHTML = '<div class="target-checking">Revisando destino…</div>';
+      fetch("/api/target-check?ids=" + encodeURIComponent(ids) + "&dest_folder=" + encodeURIComponent(path))
+        .then(function (r) { return r.json(); })
+        .then(function (data) { box.innerHTML = data.html || ""; })
+        .catch(function () { box.innerHTML = ""; });
     }
   </script>
 </body>

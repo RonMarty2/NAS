@@ -8,7 +8,7 @@ import os
 import threading
 import time
 
-from . import config, db, identify, notify
+from . import config, db, filemeta, identify, notify
 from .metadata import music as music_meta
 from .metadata import tmdb
 
@@ -19,6 +19,10 @@ STABLE_AGE = 60
 POLL_INTERVAL = 30
 
 _stop = threading.Event()
+
+
+def _probe_enabled():
+    return str(config.get("probe_media_info")).strip().lower() in ("1", "true", "yes", "si", "sí", "on")
 
 
 def _is_stable(path):
@@ -104,6 +108,11 @@ def _process_file(path):
     item_id = db.add_item(path, name, size)
     if item_id is None:
         return None  # ya existía
+    try:
+        info = filemeta.inspect_file(path, name, size, allow_probe=_probe_enabled())
+        db.update_item(item_id, media_info=filemeta.to_json(info))
+    except Exception:
+        pass
     ident = identify.identify(path)
     try:
         _enrich(item_id, path, ident)
@@ -139,6 +148,22 @@ def reenrich_pending():
             )
 
 
+def refresh_pending_file_info():
+    """Completa peso/calidad/idioma para pendientes creados antes de esta versión."""
+    for it in db.list_items(status="pending"):
+        if it["media_info"]:
+            continue
+        path = it["original_path"]
+        if not os.path.exists(path):
+            continue
+        try:
+            size = os.path.getsize(path)
+            info = filemeta.inspect_file(path, it["filename"], size, allow_probe=_probe_enabled())
+            db.update_item(it["id"], size_bytes=size, media_info=filemeta.to_json(info))
+        except Exception:
+            continue
+
+
 def scan_once():
     """Recorre la carpeta de descargas una vez. Devuelve nº de archivos vistos."""
     root = config.get("downloads_dir")
@@ -153,6 +178,7 @@ def scan_once():
             seen += 1
     # Reintenta metadatos de lo que quedó pendiente sin reconocer.
     reenrich_pending()
+    refresh_pending_file_info()
     # Avisa si llegaron descargas nuevas para revisar.
     if nuevos:
         plural = "s" if nuevos != 1 else ""

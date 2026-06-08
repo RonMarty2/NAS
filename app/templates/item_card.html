@@ -9,6 +9,10 @@
 
   <div class="info">
     <div class="filename" title="{{ item['original_path'] }}">📄 {{ item["filename"] }}</div>
+    {% set meta = file_meta[item['id']] %}
+    {% set dup = duplicate_map[item['id']] %}
+    {% set target = target_map[item['id']] %}
+    {% include "file_facts.html" %}
 
     {% if item["media_type"] == "music" %}
       <h3>🎵 {{ item["detected_title"] or "Canción sin título" }}</h3>
@@ -27,6 +31,7 @@
     {% endif %}
 
     {% if item["error"] %}<p class="error">⚠️ {{ item["error"] }}</p>{% endif %}
+    {% include "duplicate_notice.html" %}
 
     {% if item["status"] == "processing" %}
       {# ---- En movimiento: nada que tocar, solo mostrar progreso ---- #}
@@ -36,14 +41,16 @@
     {# ---- Selector de carpeta destino + vista previa ---- #}
     {% set leaf = leaves[item['id']] %}
     {% set base_def = defaults[item['id']] %}
-    <div class="dest-form" data-item="{{ item['id'] }}" data-leaf="{{ leaf }}">
+    <div class="dest-form" data-item="{{ item['id'] }}" data-leaf="{{ leaf }}" data-check-ids="{{ item['id'] }}">
       <div class="dest-row">
         <span>📁 Mover a:</span>
         <strong class="chosen-folder" id="chosen-{{ item['id'] }}">{{ base_def }}</strong>
         <button type="button" class="btn btn-secondary"
-                onclick="openFolderPicker({{ item['id'] }}, '{{ base_def }}')">📂 Elegir carpeta…</button>
+                onclick="openFolderPicker({{ item['id'] }}, {{ base_def|tojson }})">📂 Elegir carpeta…</button>
       </div>
       <p class="preview">Quedará en: <span id="prev-{{ item['id'] }}">{{ base_def }}/{{ leaf }}</span></p>
+      {% set check_id = item['id'] %}
+      {% include "target_notice.html" %}
       <form method="post" action="/item/{{ item['id'] }}/confirm">
         <input type="hidden" name="dest_folder" id="dest-{{ item['id'] }}" value="{{ base_def }}">
         <button class="btn btn-primary" type="submit">✅ Confirmar y mover</button>

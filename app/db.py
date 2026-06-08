@@ -59,6 +59,9 @@ CREATE TABLE IF NOT EXISTS items (
     artist         TEXT,
     album          TEXT,
     track_no       TEXT,
+    media_info     TEXT,            -- resumen JSON de calidad/idioma/códecs
+    file_hash      TEXT,            -- SHA-256 para duplicados exactos
+    file_hash_size INTEGER,
     dest_folder    TEXT,            -- carpeta base elegida por el usuario
     dest_path      TEXT,
     error          TEXT,
@@ -73,6 +76,9 @@ _MIGRATIONS = {
     "artist": "TEXT",
     "album": "TEXT",
     "track_no": "TEXT",
+    "media_info": "TEXT",
+    "file_hash": "TEXT",
+    "file_hash_size": "INTEGER",
     "dest_folder": "TEXT",
 }
 
