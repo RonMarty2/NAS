@@ -8,7 +8,7 @@ import os
 import threading
 import time
 
-from . import config, db, identify
+from . import config, db, identify, notify
 from .metadata import music as music_meta
 from .metadata import tmdb
 
@@ -29,6 +29,13 @@ def _is_stable(path):
     except OSError:
         return False
     return True
+
+
+def _is_junk(name):
+    """True si el nombre indica basura (sample, activador, crack, trailer, etc.)."""
+    low = name.lower()
+    patterns = [p.strip().lower() for p in config.get("junk_patterns").split(",") if p.strip()]
+    return any(pat in low for pat in patterns)
 
 
 def _enrich(item_id, path, ident):
@@ -70,34 +77,39 @@ def _enrich(item_id, path, ident):
 
 
 def _process_file(path):
-    """Procesa un archivo concreto: lo añade y lo enriquece si es nuevo."""
+    """Procesa un archivo concreto: lo añade y lo enriquece si es nuevo.
+
+    Devuelve el id si se añadió uno nuevo, o None."""
     name = os.path.basename(path)
     ext = os.path.splitext(name)[1].lower()
 
     if ext in INCOMPLETE_EXTS:
-        return
+        return None
     kind = identify.classify_extension(path)
     if kind not in ("video", "music"):
-        return  # ignoramos subtítulos sueltos, basura, etc.
+        return None  # ignoramos subtítulos sueltos, basura, etc.
+    if _is_junk(name):
+        return None  # sample, activador, crack, trailer, etc.
 
     try:
         size = os.path.getsize(path)
     except OSError:
-        return
+        return None
     min_bytes = int(config.get("min_size_mb") or 0) * 1024 * 1024
     if kind == "video" and size < min_bytes:
-        return
+        return None
     if not _is_stable(path):
-        return
+        return None
 
     item_id = db.add_item(path, name, size)
     if item_id is None:
-        return  # ya existía
+        return None  # ya existía
     ident = identify.identify(path)
     try:
         _enrich(item_id, path, ident)
     except Exception as e:  # nunca dejar el item a medias por un fallo de red
         db.update_item(item_id, error=str(e))
+    return item_id
 
 
 def reenrich_pending():
@@ -133,12 +145,22 @@ def scan_once():
     if not root or not os.path.isdir(root):
         return 0
     seen = 0
+    nuevos = 0
     for dirpath, _dirs, files in os.walk(root):
         for f in files:
-            _process_file(os.path.join(dirpath, f))
+            if _process_file(os.path.join(dirpath, f)) is not None:
+                nuevos += 1
             seen += 1
     # Reintenta metadatos de lo que quedó pendiente sin reconocer.
     reenrich_pending()
+    # Avisa si llegaron descargas nuevas para revisar.
+    if nuevos:
+        plural = "s" if nuevos != 1 else ""
+        notify.notify(
+            "NAS Organizer",
+            f"Llegaron {nuevos} archivo{plural} nuevo{plural} para revisar.",
+            config.get("app_url") or None,
+        )
     return seen
 
 

@@ -30,6 +30,29 @@
                placeholder="es-ES"></label>
       <label>Tamaño mínimo de vídeo (MB) para considerarlo
         <input type="text" name="min_size_mb" value="{{ cfg['min_size_mb'] }}"></label>
+      <label>Palabras de basura a ignorar (separadas por comas)
+        <input type="text" name="junk_patterns" value="{{ cfg['junk_patterns'] }}"
+               placeholder="sample, activador, crack, trailer…"></label>
+    </fieldset>
+
+    <fieldset>
+      <legend>Notificaciones (cuando llega algo nuevo)</legend>
+      <label>Enlace a esta app (para abrirla desde el aviso)
+        <input type="text" name="app_url" value="{{ cfg['app_url'] }}"
+               placeholder="http://192.168.100.178:8678"></label>
+      <label>ntfy — tema/topic (lo más fácil: instala la app ntfy y elige un nombre)
+        <input type="text" name="ntfy_topic" value="{{ cfg['ntfy_topic'] }}"
+               placeholder="ej. nas-ronny-9z3k (que sea difícil de adivinar)"></label>
+      <label>ntfy — servidor
+        <input type="text" name="ntfy_server" value="{{ cfg['ntfy_server'] }}"
+               placeholder="https://ntfy.sh"></label>
+      <label>Discord — URL del webhook (opcional)
+        <input type="text" name="discord_webhook" value="{{ cfg['discord_webhook'] }}"
+               placeholder="https://discord.com/api/webhooks/…"></label>
+      <label>Telegram — token del bot (opcional)
+        <input type="text" name="telegram_token" value="{{ cfg['telegram_token'] }}"></label>
+      <label>Telegram — chat id (opcional)
+        <input type="text" name="telegram_chat_id" value="{{ cfg['telegram_chat_id'] }}"></label>
     </fieldset>
 
     <fieldset>
@@ -43,6 +66,13 @@
     </fieldset>
 
     <button class="btn btn-primary" type="submit">💾 Guardar ajustes</button>
+  </form>
+
+  <hr>
+  <h2>Probar notificaciones</h2>
+  <p class="meta">Envía un aviso de prueba a los canales que configuraste arriba (guarda primero).</p>
+  <form method="post" action="/notify/test">
+    <button class="btn btn-secondary" type="submit">🔔 Enviar notificación de prueba</button>
   </form>
 
   <hr>

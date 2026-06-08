@@ -155,15 +155,15 @@ columnas añadidas con `ALTER TABLE` desde `_MIGRATIONS` en `db.py`.
 ## 8. ROADMAP de mejoras (priorizado)
 
 ### 🔴 Alta prioridad (impacto directo en el uso diario)
-- **A. Filtro de basura/extras (rápido):** detectar y auto-omitir samples, "activador",
-  archivos diminutos, extras de series, `.rar/.nfo/.txt`. Quita ruido inmediato.
-- **B. Normalizar leetspeak antes de buscar** (rápido): `1→i, 3→e, 4→a, 0→o, 5→s` para que
-  `Str1pt3as3` → `Striptease`. Mejora el reconocimiento sin esfuerzo del usuario.
-- **C. Notificaciones** (Telegram / Discord / ntfy) cuando llega algo nuevo a revisar.
-  Así no hay que estar abriendo la app.
-- **D. Escribir `.nfo` con `tmdbid` + descargar póster local:** Jellyfin matchea exacto y
-  respeta el título elegido (latino). Soluciona títulos equivocados.
+- ✅ **A. Filtro de basura (HECHO):** `junk_patterns` (config) + `watcher._is_junk`. Ignora
+  sample/activador/crack/keygen/trailer/etc. Editable en Ajustes.
+- ✅ **B. Leetspeak (HECHO):** `tmdb._deleet` reintenta `Str1pt3as3` → `Striptease` como respaldo.
+- ✅ **C. Notificaciones (HECHO):** `app/notify.py` (ntfy / Discord / Telegram). Avisa al llegar
+  descargas nuevas + botón de prueba en Ajustes. Campos en Ajustes.
+- ✅ **D. `.nfo` + póster local (HECHO):** `organizer.write_metadata` escribe `movie.nfo` /
+  `tvshow.nfo` con `tmdbid` y guarda `poster.jpg`. Jellyfin matchea exacto y respeta el título.
 - **E. Autenticación simple** (contraseña/PIN) — seguridad si se accede por Tailscale/remoto.
+  *(Pendiente — siguiente candidato de alta prioridad.)*
 
 ### 🟡 Media prioridad
 - **F. Acciones en lote:** "Confirmar todos los reconocidos", "Omitir/Eliminar no reconocidos".
@@ -212,5 +212,17 @@ fluidez (WAL, fondo) → es-MX → protección anti-sobrescritura. Desplegado y 
 mueve "Striptease (1996)" y "Alerta Extinción (2026)" correctamente con póster en latino.
 Pendiente: conectar Jellyfin (URL+API key), y elegir mejoras del roadmap (§8).
 
-> **Próximo paso sugerido:** empezar por A+B (filtro de basura + leetspeak) y D (.nfo), que
-> resuelven los problemas que el usuario ya está viendo (basura, títulos equivocados).
+### Sesión 2 — 2026-06-08 (mejoras del roadmap A–D)
+- Implementadas y verificadas: **A** filtro de basura (`junk_patterns`/`_is_junk`),
+  **B** leetspeak (`tmdb._deleet`), **C** notificaciones (`app/notify.py`: ntfy/Discord/Telegram
+  + botón de prueba), **D** `.nfo` + póster local (`organizer.write_metadata`).
+- Nota operativa: el repo **local** se había revertido a `cdd01cb`; se recuperó todo con
+  `git reset --hard origin/<rama>` (el remoto tenía todo). **Siempre** verificar
+  `git log` vs `origin/` al iniciar sesión por si el contenedor se re-clonó atrás.
+- Config nueva: `junk_patterns`, `app_url`, `ntfy_server/topic`, `discord_webhook`,
+  `telegram_token/chat_id` (todo editable en Ajustes).
+
+> **Próximo paso sugerido:** **E. Autenticación** (contraseña) por seguridad, y/o **F.
+> acciones en lote** (confirmar todos los reconocidos / borrar no reconocidos). Recordar al
+> usuario: para usar las funciones nuevas debe **actualizar** el contenedor (Detener →
+> Construir, gracias a `pull_policy: always`) y poner el `app_url` + un canal de notificación.

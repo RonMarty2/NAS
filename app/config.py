@@ -25,6 +25,15 @@ DEFAULTS = {
     "music_exts":    ".mp3,.flac,.m4a,.aac,.ogg,.opus,.wav,.wma",
     "subtitle_exts": ".srt,.sub,.ass,.ssa,.vtt,.idx",
     "min_size_mb":   "10",  # ignora archivos minúsculos (basura)
+    # Palabras que marcan basura: si el nombre las contiene, se ignora el archivo.
+    "junk_patterns": "sample,muestra,activador,activator,crack,keygen,rarbg,proof,trailer",
+    # Notificaciones (todas opcionales; se configuran en Ajustes).
+    "app_url":          "",  # ej. http://192.168.100.178:8678 (enlace del aviso)
+    "ntfy_server":      "https://ntfy.sh",
+    "ntfy_topic":       "",
+    "discord_webhook":  "",
+    "telegram_token":   "",
+    "telegram_chat_id": "",
 }
 
 

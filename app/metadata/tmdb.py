@@ -59,7 +59,22 @@ def search(query, media_type, year=None):
     return [_normalize(x, media_type) for x in results[:10]]
 
 
+_LEET = str.maketrans({"1": "i", "3": "e", "4": "a", "0": "o", "5": "s", "7": "t", "8": "b"})
+
+
+def _deleet(text):
+    """Convierte nombres ofuscados con números a letras: 'Str1pt3as3' -> 'Striptease'."""
+    return text.translate(_LEET) if text else text
+
+
 def best_match(query, media_type, year=None):
-    """Devuelve la mejor coincidencia (la primera) o None."""
+    """Devuelve la mejor coincidencia (la primera) o None.
+
+    Si no encuentra nada, reintenta con el nombre 'des-leeteado' (por si venía
+    ofuscado con números, p.ej. 'Str1pt3as3' -> 'Striptease')."""
     results = search(query, media_type, year)
+    if not results:
+        deleeted = _deleet(query)
+        if deleeted and deleeted != query:
+            results = search(deleeted, media_type, year)
     return results[0] if results else None

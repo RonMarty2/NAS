@@ -2,6 +2,9 @@
 import os
 import re
 import shutil
+from xml.sax.saxutils import escape
+
+import requests
 
 from . import config
 
@@ -102,6 +105,64 @@ def unique_path(path):
     return f"{base} ({n}){ext}"
 
 
+def _g(item, key):
+    try:
+        return item[key]
+    except (KeyError, IndexError, TypeError):
+        return None
+
+
+def _save_poster(poster_url, dest_jpg):
+    """Descarga el póster a dest_jpg si hay URL y no existe ya. Mejor esfuerzo."""
+    if not poster_url or os.path.exists(dest_jpg):
+        return
+    try:
+        r = requests.get(poster_url, timeout=8)
+        r.raise_for_status()
+        with open(dest_jpg, "wb") as f:
+            f.write(r.content)
+    except Exception:
+        pass
+
+
+def write_metadata(item, dest):
+    """Escribe .nfo (con el id de TMDB) y guarda el póster local, para que Jellyfin
+    reconozca EXACTO y respete el título elegido. Mejor esfuerzo: nunca rompe el movido."""
+    tmdb_id = _g(item, "tmdb_id")
+    if not tmdb_id:
+        return
+    media_type = _g(item, "media_type")
+    title = escape(str(_g(item, "chosen_title") or _g(item, "detected_title") or ""))
+    year = _g(item, "chosen_year") or _g(item, "detected_year") or ""
+    poster = _g(item, "poster_url")
+
+    try:
+        if media_type == "movie":
+            folder = os.path.dirname(dest)
+            nfo = os.path.splitext(dest)[0] + ".nfo"
+            with open(nfo, "w", encoding="utf-8") as f:
+                f.write(
+                    f'<?xml version="1.0" encoding="UTF-8"?>\n<movie>\n'
+                    f'  <title>{title}</title>\n  <year>{year}</year>\n'
+                    f'  <uniqueid type="tmdb" default="true">{tmdb_id}</uniqueid>\n</movie>\n'
+                )
+            _save_poster(poster, os.path.join(folder, "poster.jpg"))
+
+        elif media_type == "series":
+            series_root = os.path.dirname(os.path.dirname(dest))  # …/Título
+            nfo = os.path.join(series_root, "tvshow.nfo")
+            if not os.path.exists(nfo):
+                with open(nfo, "w", encoding="utf-8") as f:
+                    f.write(
+                        f'<?xml version="1.0" encoding="UTF-8"?>\n<tvshow>\n'
+                        f'  <title>{title}</title>\n'
+                        f'  <uniqueid type="tmdb" default="true">{tmdb_id}</uniqueid>\n</tvshow>\n'
+                    )
+            _save_poster(poster, os.path.join(series_root, "poster.jpg"))
+    except Exception:
+        pass
+
+
 def move_item(item):
     """Mueve el archivo (y subtítulos) a su destino. Devuelve (ok, dest_path, mensaje)."""
     src = item["original_path"]
@@ -127,5 +188,8 @@ def move_item(item):
                 shutil.move(sub, unique_path(dest_stem + sub_ext))
             except Exception:
                 pass
+
+    # Escribe .nfo + póster para que Jellyfin reconozca exacto (mejor esfuerzo).
+    write_metadata(item, dest)
 
     return True, dest, "Movido correctamente."

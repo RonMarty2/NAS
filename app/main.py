@@ -99,8 +99,11 @@ def settings_save(
     default_movie_dir: str = Form(""), default_series_dir: str = Form(""),
     default_music_dir: str = Form(""),
     tmdb_api_key: str = Form(""), jellyfin_url: str = Form(""),
-    jellyfin_api_key: str = Form(""), metadata_language: str = Form("es-ES"),
-    min_size_mb: str = Form("10"),
+    jellyfin_api_key: str = Form(""), metadata_language: str = Form("es-MX"),
+    min_size_mb: str = Form("10"), junk_patterns: str = Form(""),
+    app_url: str = Form(""), ntfy_server: str = Form(""), ntfy_topic: str = Form(""),
+    discord_webhook: str = Form(""), telegram_token: str = Form(""),
+    telegram_chat_id: str = Form(""),
 ):
     for key, val in {
         "downloads_dir": downloads_dir, "library_roots": library_roots,
@@ -108,10 +111,23 @@ def settings_save(
         "default_music_dir": default_music_dir,
         "tmdb_api_key": tmdb_api_key, "jellyfin_url": jellyfin_url,
         "jellyfin_api_key": jellyfin_api_key, "metadata_language": metadata_language,
-        "min_size_mb": min_size_mb,
+        "min_size_mb": min_size_mb, "junk_patterns": junk_patterns,
+        "app_url": app_url, "ntfy_server": ntfy_server, "ntfy_topic": ntfy_topic,
+        "discord_webhook": discord_webhook, "telegram_token": telegram_token,
+        "telegram_chat_id": telegram_chat_id,
     }.items():
         config.set(key, val.strip())
     return RedirectResponse("/settings?saved=true", status_code=303)
+
+
+@app.post("/notify/test")
+def notify_test():
+    """Envía una notificación de prueba a los canales configurados."""
+    from . import notify as _notify
+    _notify.notify("NAS Organizer", "🔔 Notificación de prueba: ¡funciona!",
+                   config.get("app_url") or None)
+    return RedirectResponse("/settings?saved=false&msg=Notificación de prueba enviada.",
+                            status_code=303)
 
 
 # ---------------- Acciones sobre items ----------------
