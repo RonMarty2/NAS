@@ -64,14 +64,20 @@ Edita **solo la parte izquierda** de `volumes` para que apunte a tus carpetas re
 > sugeridas por defecto se pueden cambiar en **Ajustes**.
 
 ### 4. Levanta el contenedor
-Por terminal (SSH):
+El `docker-compose.yml` usa una **imagen ya construida** que se publica sola en GHCR
+(`ghcr.io/ronmarty2/nas-organizer:latest`), así no hace falta compilar nada en el NAS.
 
-```bash
-cd /volume1/docker/nas-organizer
-docker compose up -d --build
-```
+Desde **Container Manager → Proyecto → Crear**, apuntando a la carpeta con el
+`docker-compose.yml`. (Para que el NAS pueda bajar la imagen sin contraseña, el paquete
+debe estar en **público** una sola vez: GitHub → tu perfil → Packages → `nas-organizer`
+→ Package settings → Change visibility → Public.)
 
-O desde **Container Manager → Proyecto → Crear**, apuntando a esta carpeta.
+> ¿Prefieres compilar desde el código en vez de usar la imagen? Usa `docker-compose.build.yml`.
+
+### 🔄 Actualizar (1 clic)
+Cuando haya una versión nueva (se construye sola al subir cambios a GitHub):
+**Container Manager → Proyecto `nas-organizer` → Acción → Reconstruir**. Bajará la última
+imagen y reiniciará. No hay que descargar ni copiar archivos.
 
 ### 5. Abre la interfaz
 Desde cualquier navegador (PC o móvil en tu red):

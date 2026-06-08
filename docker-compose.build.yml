@@ -1,0 +1,23 @@
+services:
+  nas-organizer:
+    # Construye la imagen desde el código local (necesita TODA la carpeta del proyecto).
+    # Úsalo solo si NO quieres usar la imagen automática de GHCR.
+    build: .
+    container_name: nas-organizer
+    restart: unless-stopped
+    ports:
+      - "8678:8678"
+    environment:
+      - NAS_DOWNLOADS_DIR=/volume1/homes/rnd261190/jdownloader
+      - NAS_LIBRARY_ROOTS=/volume1/video,/volume1/music
+      - NAS_DEFAULT_MOVIE_DIR=/volume1/video/peliculas
+      - NAS_DEFAULT_SERIES_DIR=/volume1/video/series
+      - NAS_DEFAULT_MUSIC_DIR=/volume1/music
+      - TMDB_API_KEY=${TMDB_API_KEY:-}
+      - JELLYFIN_URL=${JELLYFIN_URL:-}
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
+      - METADATA_LANGUAGE=es-ES
+      - TZ=America/Mexico_City
+    volumes:
+      - /volume1:/volume1
+      - ./data:/data

@@ -1,7 +1,8 @@
 services:
   nas-organizer:
-    build: .
-    # Si prefieres una imagen ya construida, comenta "build" y usa "image".
+    # Imagen ya construida automáticamente en GitHub (actualización de 1 clic).
+    # Para actualizar: Container Manager → este proyecto → Acción → Reconstruir.
+    image: ghcr.io/ronmarty2/nas-organizer:latest
     container_name: nas-organizer
     restart: unless-stopped
     ports:
