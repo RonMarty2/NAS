@@ -23,7 +23,7 @@ services:
       - TMDB_API_KEY=${TMDB_API_KEY:-}
       - JELLYFIN_URL=${JELLYFIN_URL:-}
       - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
-      - METADATA_LANGUAGE=es-ES
+      - METADATA_LANGUAGE=es-MX
       - TZ=America/Mexico_City
     volumes:
       # Montamos todo /volume1 con la misma ruta dentro del contenedor. Esto hace que

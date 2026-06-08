@@ -16,7 +16,7 @@ services:
       - TMDB_API_KEY=${TMDB_API_KEY:-}
       - JELLYFIN_URL=${JELLYFIN_URL:-}
       - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
-      - METADATA_LANGUAGE=es-ES
+      - METADATA_LANGUAGE=es-MX
       - TZ=America/Mexico_City
     volumes:
       - /volume1:/volume1

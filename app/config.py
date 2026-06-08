@@ -19,7 +19,7 @@ DEFAULTS = {
     "tmdb_api_key":     os.environ.get("TMDB_API_KEY", ""),
     "jellyfin_url":     os.environ.get("JELLYFIN_URL", ""),
     "jellyfin_api_key": os.environ.get("JELLYFIN_API_KEY", ""),
-    "metadata_language": os.environ.get("METADATA_LANGUAGE", "es-ES"),
+    "metadata_language": os.environ.get("METADATA_LANGUAGE", "es-MX"),
     # Extensiones que consideramos vídeo / música / subtítulos.
     "video_exts":    ".mkv,.mp4,.avi,.mov,.m4v,.wmv,.mpg,.mpeg,.ts",
     "music_exts":    ".mp3,.flac,.m4a,.aac,.ogg,.opus,.wav,.wma",
