@@ -90,6 +90,18 @@ def _find_subtitles(original_path):
     return found
 
 
+def unique_path(path):
+    """Si `path` ya existe, devuelve una variante ' (2)', ' (3)'… que no exista,
+    para no sobrescribir nunca un archivo que ya estaba."""
+    if not os.path.exists(path):
+        return path
+    base, ext = os.path.splitext(path)
+    n = 2
+    while os.path.exists(f"{base} ({n}){ext}"):
+        n += 1
+    return f"{base} ({n}){ext}"
+
+
 def move_item(item):
     """Mueve el archivo (y subtítulos) a su destino. Devuelve (ok, dest_path, mensaje)."""
     src = item["original_path"]
@@ -98,19 +110,21 @@ def move_item(item):
 
     dest = build_dest(item)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
+    # Protección anti-sobrescritura: si ya hay uno con ese nombre, no lo pisamos.
+    dest = unique_path(dest)
 
     try:
         shutil.move(src, dest)
     except Exception as e:
         return False, None, f"Error al mover: {e}"
 
-    # Mover subtítulos asociados (solo vídeo)
+    # Mover subtítulos asociados (solo vídeo), junto al vídeo y sin sobrescribir
     if item["media_type"] in ("movie", "series"):
         dest_stem = os.path.splitext(dest)[0]
         for sub in _find_subtitles(src):
             sub_ext = os.path.splitext(sub)[1]
             try:
-                shutil.move(sub, dest_stem + sub_ext)
+                shutil.move(sub, unique_path(dest_stem + sub_ext))
             except Exception:
                 pass
 
