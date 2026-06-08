@@ -83,6 +83,7 @@ h1 { font-size: 1.4rem; }
   border-radius: 8px; background: rgba(255,255,255,.025);
 }
 .dup-compare h4 { margin: 0 0 .55rem; font-size: .9rem; color: var(--text); }
+.dedup-all { margin: 0 0 .7rem; }
 .dup-group { border-top: 1px solid var(--border); padding-top: .55rem; margin-top: .55rem; }
 .dup-group:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
 .dup-group-head { display: flex; gap: .5rem; flex-wrap: wrap; align-items: baseline; margin-bottom: .4rem; }

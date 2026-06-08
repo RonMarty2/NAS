@@ -160,6 +160,61 @@ def delete_exact_duplicate(item_id):
     return True, "Duplicado exacto borrado."
 
 
+def delete_all_exact_duplicates(item_ids):
+    """Borra EN LOTE los duplicados exactos entre los items dados.
+
+    Para cada grupo que terminaría en el mismo destino, calcula el SHA-256 (una
+    vez, cacheado) y, dentro de cada conjunto idéntico (mismo tamaño y hash),
+    CONSERVA una copia legible y borra las demás. Nunca borra si no queda una
+    copia idéntica y legible. Devuelve (borrados, mensaje)."""
+    candidates = []
+    for item_id in item_ids:
+        item = db.get_item(item_id)
+        if item and item["status"] == "pending" and os.path.exists(item["original_path"]):
+            candidates.append(item)
+
+    by_leaf = {}
+    for item in candidates:
+        by_leaf.setdefault(_leaf_key(item), []).append(item)
+
+    deleted = 0
+    for _key, group in by_leaf.items():
+        if len(group) < 2:
+            continue
+        by_hash = {}
+        for item in group:
+            digest, size = ensure_hash(item)
+            if digest:
+                by_hash.setdefault((digest, size), []).append(item)
+
+        for _hs, identical in by_hash.items():
+            if len(identical) < 2:
+                continue
+            # Conservamos la primera copia que pase la validación de lectura.
+            keeper = None
+            for item in identical:
+                if filemeta.media_is_readable(item["original_path"]) is not False:
+                    keeper = item
+                    break
+            if keeper is None:
+                continue  # ninguna legible: demasiado arriesgado, no tocamos nada
+            for victim in identical:
+                if victim["id"] == keeper["id"]:
+                    continue
+                if not os.path.exists(keeper["original_path"]):
+                    break  # si el que conservamos desapareció, paramos por seguridad
+                try:
+                    os.remove(victim["original_path"])
+                    db.delete_item(victim["id"])
+                    deleted += 1
+                except OSError:
+                    pass
+
+    if deleted:
+        return deleted, f"Se borraron {deleted} duplicado(s) idéntico(s)."
+    return 0, "No se encontraron duplicados idénticos verificados para borrar."
+
+
 def _empty():
     return {
         "similar_count": 0,

@@ -94,7 +94,7 @@ def _target_map(items, defaults):
 
 
 @app.get("/tab/{media_type}", response_class=HTMLResponse)
-def tab(request: Request, media_type: str):
+def tab(request: Request, media_type: str, dedup: int = 0):
     # Mostramos lo pendiente y lo que se está moviendo (para ver el progreso).
     processing = db.list_items(status="processing", media_type=media_type)
     pending = db.list_items(status="pending", media_type=media_type)
@@ -111,7 +111,8 @@ def tab(request: Request, media_type: str):
                 target_map[ep["id"]] = targets.inspect(ep, g["default_base"])
         return templates.TemplateResponse("series.html", {
             "request": request, "tabs": TABS, "active": media_type, "page": "tabs",
-            "groups": groups, "has_processing": bool(processing),
+            "groups": groups, "has_processing": bool(processing) or bool(dedup),
+            "deduping": bool(dedup),
             "file_meta": _file_meta_map(items), "duplicate_map": duplicates.analyze(items),
             "target_map": target_map,
         })
@@ -292,6 +293,16 @@ def confirm_series(ids: List[int] = Form(...), dest_folder: str = Form(""),
         db.update_item(item_id, dest_folder=target, status="processing", error=None)
         threading.Thread(target=_do_move, args=(item_id,), daemon=True).start()
     return _redirect_to_type("series")
+
+
+@app.post("/series/dedup")
+def dedup_series(ids: List[int] = Form(...)):
+    """Borra en lote los duplicados idénticos (SHA-256), conservando uno de cada.
+
+    Se hace en segundo plano porque puede leer varios GB para verificar."""
+    threading.Thread(target=duplicates.delete_all_exact_duplicates,
+                     args=(list(ids),), daemon=True).start()
+    return RedirectResponse("/tab/series?dedup=1", status_code=303)
 
 
 @app.post("/item/{item_id}/skip")
