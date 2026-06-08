@@ -3,7 +3,7 @@ import os
 import threading
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -35,6 +35,19 @@ def _startup():
 @app.get("/", response_class=HTMLResponse)
 def index():
     return RedirectResponse("/tab/movie")
+
+
+# Service worker en la raíz (necesario para que la PWA tenga ámbito "/").
+_SW_JS = """
+self.addEventListener('install', function (e) { self.skipWaiting(); });
+self.addEventListener('activate', function (e) { self.clients.claim(); });
+self.addEventListener('fetch', function (e) { /* passthrough: red primero */ });
+"""
+
+
+@app.get("/sw.js")
+def service_worker():
+    return Response(content=_SW_JS, media_type="application/javascript")
 
 
 @app.get("/tab/{media_type}", response_class=HTMLResponse)

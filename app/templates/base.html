@@ -6,6 +6,14 @@
   <title>NAS Organizer</title>
   {% if has_processing %}<meta http-equiv="refresh" content="6">{% endif %}
   <link rel="stylesheet" href="/static/style.css">
+  {# ---- PWA: instalable como app con icono propio ---- #}
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <meta name="theme-color" content="#00a4dc">
+  <link rel="icon" href="/static/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="NAS Organizer">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 </head>
 <body>
   <header>
@@ -46,6 +54,11 @@
   </div>
 
   <script>
+    // Registrar el service worker (solo en contexto seguro: https o localhost).
+    if ("serviceWorker" in navigator && window.isSecureContext) {
+      navigator.serviceWorker.register("/sw.js").catch(function () {});
+    }
+
     var fmItem = null, fmPath = "";
 
     function openFolderPicker(itemId, startPath) {
