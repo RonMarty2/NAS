@@ -86,6 +86,34 @@ h1 { font-size: 1.4rem; }
   border-radius: 8px; background: rgba(255,255,255,.025);
 }
 .dup-compare h4 { margin: 0 0 .55rem; font-size: .9rem; color: var(--text); }
+.dedup-banner {
+  margin: .45rem 0 .65rem;
+  padding: .52rem .62rem;
+  border: 1px solid rgba(0, 164, 220, .7);
+  border-radius: 8px;
+  background: rgba(0, 164, 220, .08);
+  font-size: .82rem;
+}
+.dedup-banner strong {
+  display: block;
+  margin-bottom: .12rem;
+  color: var(--primary);
+}
+.dedup-banner span,
+.dedup-banner small {
+  display: block;
+  color: var(--muted);
+  line-height: 1.35;
+}
+.dedup-banner.done {
+  border-color: rgba(63, 185, 80, .65);
+  background: rgba(63, 185, 80, .08);
+}
+.dedup-banner.done strong { color: var(--ok); }
+.dedup-banner.running {
+  border-color: rgba(0, 164, 220, .85);
+  background: rgba(0, 164, 220, .08);
+}
 .dedup-all { margin: 0 0 .7rem; }
 .dup-group { border-top: 1px solid var(--border); padding-top: .55rem; margin-top: .55rem; }
 .dup-group:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }

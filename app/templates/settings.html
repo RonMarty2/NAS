@@ -87,9 +87,18 @@
   <p class="meta">Busca en TODO lo pendiente (películas, series y música) archivos
     <strong>idénticos</strong> y borra los repetidos, conservando una copia legible de cada uno.
     Verifica por SHA-256 antes de borrar; lo que no sea idéntico no se toca. Corre en segundo plano.</p>
+  {% if dedup_notice.visible %}
+    <div class="dedup-banner {{ 'running' if dedup_notice.running else 'done' }}">
+      <strong>{% if dedup_notice.running %}Limpieza global en curso{% else %}Limpieza global terminada{% endif %}</strong>
+      <span>{{ dedup_notice.message }}</span>
+      {% if dedup_notice.running %}
+        <small>La app seguirá respondiendo mientras calcula el hash de los archivos.</small>
+      {% endif %}
+    </div>
+  {% endif %}
   <form method="post" action="/dedup-all"
-        onsubmit="return confirm('Se calculará el SHA-256 de los archivos repetidos y se borrarán SOLO los idénticos, conservando uno de cada. ¿Continuar?');">
-    <button class="btn btn-danger" type="submit">🧹 Borrar duplicados idénticos de toda la biblioteca pendiente</button>
+        onsubmit="return confirmAndMarkDedup(this, 'Se calculará el SHA-256 de los archivos repetidos y se borrarán SOLO los idénticos, conservando uno de cada. ¿Continuar?');">
+    <button class="btn btn-danger" type="submit" {% if dedup_notice.running %}disabled{% endif %}>🧹 Borrar duplicados idénticos de toda la biblioteca pendiente</button>
   </form>
 
   <hr>

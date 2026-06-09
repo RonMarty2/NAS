@@ -1,4 +1,5 @@
 """Aplicación web (FastAPI) — bandeja de revisión de descargas para Jellyfin."""
+import json
 import html
 import os
 import threading
@@ -26,11 +27,16 @@ TABS = [
     ("music", "Música"),
 ]
 
+DEDUP_STATUS_KEY = "dedup_status"
+DEDUP_NOTICE_TTL_SECONDS = 20
+DEDUP_LOCK = threading.Lock()
+
 
 @app.on_event("startup")
 def _startup():
     db.init_db()
     db.reset_processing()  # recupera movimientos que quedaron a medias
+    _set_dedup_state({})
     watcher.start_background()
 
 
@@ -94,12 +100,95 @@ def _target_map(items, defaults):
     return {it["id"]: targets.inspect(it, defaults[it["id"]]) for it in items}
 
 
+def _dedup_state():
+    raw = db.get_setting(DEDUP_STATUS_KEY, "")
+    if not raw:
+        return {}
+    try:
+        state = json.loads(raw)
+    except Exception:
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _dedup_notice():
+    state = _dedup_state()
+    if not state:
+        return {"visible": False, "running": False}
+
+    running = bool(state.get("running"))
+    visible = running or bool(state.get("message"))
+    finished_at = state.get("finished_at")
+
+    if not running and finished_at:
+        from datetime import datetime
+        try:
+            ended = datetime.strptime(finished_at, "%Y-%m-%d %H:%M:%S")
+            visible = (datetime.now() - ended).total_seconds() <= DEDUP_NOTICE_TTL_SECONDS
+        except Exception:
+            visible = bool(state.get("message"))
+
+    state["running"] = running
+    state["visible"] = visible
+    return state
+
+
+def _set_dedup_state(state):
+    db.set_setting(DEDUP_STATUS_KEY, json.dumps(state or {}, ensure_ascii=False))
+
+
+def _start_dedup_job(item_ids, scope):
+    started_at = _now()
+    scope_label = "de esta serie" if scope == "series" else "de toda la biblioteca pendiente"
+    with DEDUP_LOCK:
+        current = _dedup_state()
+        if current.get("running"):
+            return False
+        _set_dedup_state({
+            "running": True,
+            "scope": scope,
+            "started_at": started_at,
+            "item_count": len(item_ids),
+            "message": (
+                f"Calculando SHA-256 y borrando solo duplicados idénticos {scope_label}. "
+                "Esto puede tardar en un NAS pequeño."
+            ),
+        })
+
+    def worker():
+        try:
+            deleted, message = duplicates.delete_all_exact_duplicates(item_ids)
+            _set_dedup_state({
+                "running": False,
+                "scope": scope,
+                "started_at": started_at,
+                "finished_at": _now(),
+                "item_count": len(item_ids),
+                "deleted": deleted,
+                "message": message,
+            })
+        except Exception as exc:
+            _set_dedup_state({
+                "running": False,
+                "scope": scope,
+                "started_at": started_at,
+                "finished_at": _now(),
+                "item_count": len(item_ids),
+                "deleted": 0,
+                "message": f"No se pudo limpiar duplicados: {exc}",
+            })
+
+    threading.Thread(target=worker, daemon=True).start()
+    return True
+
+
 @app.get("/tab/{media_type}", response_class=HTMLResponse)
 def tab(request: Request, media_type: str, dedup: int = 0):
     # Mostramos lo pendiente y lo que se está moviendo (para ver el progreso).
     processing = db.list_items(status="processing", media_type=media_type)
     pending = db.list_items(status="pending", media_type=media_type)
     items = processing + pending
+    dedup_notice = _dedup_notice()
 
     if media_type == "series":
         # Series: una tarjeta por serie, expandible con sus episodios.
@@ -113,6 +202,8 @@ def tab(request: Request, media_type: str, dedup: int = 0):
         return templates.TemplateResponse("series.html", {
             "request": request, "tabs": TABS, "active": media_type, "page": "tabs",
             "groups": groups, "has_processing": bool(processing),
+            "dedup_notice": dedup_notice,
+            "dedup_running": bool(dedup_notice.get("running")),
             "deduping": bool(dedup), "tab_counts": db.pending_counts(),
             "file_meta": _file_meta_map(items), "duplicate_map": duplicates.analyze(items),
             "target_map": target_map,
@@ -128,6 +219,7 @@ def tab(request: Request, media_type: str, dedup: int = 0):
         "file_meta": _file_meta_map(items), "duplicate_map": duplicates.analyze(items),
         "target_map": _target_map(items, defaults),
         "has_processing": bool(processing),
+        "dedup_running": bool(dedup_notice.get("running")),
     })
 
 
@@ -182,6 +274,7 @@ def _target_check_html(summary):
 
 @app.get("/history", response_class=HTMLResponse)
 def history(request: Request):
+    dedup_notice = _dedup_notice()
     done = db.list_items(status="done")
     skipped = db.list_items(status="skipped")
     errored = db.list_items(status="error")
@@ -189,15 +282,19 @@ def history(request: Request):
         "request": request, "tabs": TABS, "active": "history",
         "done": done, "skipped": skipped, "errored": errored, "page": "history",
         "tab_counts": db.pending_counts(),
+        "dedup_running": bool(dedup_notice.get("running")),
     })
 
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, saved: bool = False, msg: str = ""):
+    dedup_notice = _dedup_notice()
     return templates.TemplateResponse("settings.html", {
         "request": request, "tabs": TABS, "active": "settings",
         "cfg": config.as_dict(), "saved": saved, "msg": msg, "page": "settings",
         "tab_counts": db.pending_counts(),
+        "dedup_notice": dedup_notice,
+        "dedup_running": bool(dedup_notice.get("running")),
     })
 
 
@@ -307,17 +404,15 @@ def dedup_series(ids: List[int] = Form(...)):
     """Borra en lote los duplicados idénticos (SHA-256), conservando uno de cada.
 
     Se hace en segundo plano porque puede leer varios GB para verificar."""
-    threading.Thread(target=duplicates.delete_all_exact_duplicates,
-                     args=(list(ids),), daemon=True).start()
-    return RedirectResponse("/tab/series?dedup=1", status_code=303)
+    _start_dedup_job(list(ids), "series")
+    return RedirectResponse("/tab/series", status_code=303)
 
 
 @app.post("/dedup-all")
 def dedup_all():
     """Borra en lote los duplicados idénticos de TODO lo pendiente (en segundo plano)."""
     ids = [it["id"] for it in db.list_items(status="pending")]
-    threading.Thread(target=duplicates.delete_all_exact_duplicates,
-                     args=(ids,), daemon=True).start()
+    _start_dedup_job(ids, "all")
     return RedirectResponse(
         "/settings?msg=" + quote("🧹 Limpiando duplicados idénticos en segundo plano. "
                                  "Revisa las pestañas en un momento."),
@@ -373,6 +468,7 @@ def search_form(request: Request, item_id: int, q: str = ""):
         results = tmdb.search(q, item["media_type"])
     return templates.TemplateResponse("search_results.html", {
         "request": request, "item": item, "results": results, "q": q,
+        "dedup_running": bool(_dedup_state().get("running")),
     })
 
 
@@ -394,6 +490,7 @@ def edit_music_form(request: Request, item_id: int, q: str = ""):
     candidates = music_meta.search_candidates(q) if q else []
     return templates.TemplateResponse("edit_music.html", {
         "request": request, "item": item, "candidates": candidates, "q": q,
+        "dedup_running": bool(_dedup_state().get("running")),
     })
 
 

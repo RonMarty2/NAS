@@ -2,11 +2,14 @@
 {% block content %}
   <h1>Series pendientes</h1>
 
-  {% if deduping %}
-    <p class="processing">🧹 Verificando (SHA-256) y borrando duplicados idénticos en segundo plano…
-      <small>la página se actualizará en unos segundos.</small></p>
-    {# Recarga ÚNICA a la URL limpia (sin ?dedup): evita el bucle infinito de recarga. #}
-    <script>setTimeout(function () { window.location.href = "/tab/series"; }, 9000);</script>
+  {% if dedup_notice.visible %}
+    <div class="dedup-banner {{ 'running' if dedup_notice.running else 'done' }}">
+      <strong>{% if dedup_notice.running %}Limpiando duplicados idénticos de esta serie en segundo plano{% else %}Limpieza terminada{% endif %}</strong>
+      <span>{{ dedup_notice.message }}</span>
+      {% if dedup_notice.running %}
+        <small>Se verifica SHA-256 y se conserva una copia legible. En un NAS pequeño puede tardar varios minutos.</small>
+      {% endif %}
+    </div>
   {% endif %}
 
   {% if not groups %}
@@ -69,10 +72,16 @@
             {% if g.duplicate_groups %}
               <div class="dup-compare">
                 <h4>Comparación de duplicados</h4>
+                {% if dedup_notice.running %}
+                  <div class="dedup-banner running">
+                    <strong>La limpieza ya está en marcha</strong>
+                    <span>La página se refresca sola mientras calcula SHA-256. No borra nada que no sea idéntico.</span>
+                  </div>
+                {% endif %}
                 <form method="post" action="/series/dedup" class="dedup-all"
-                      onsubmit="return confirm('Se calculará el SHA-256 de cada archivo y se borrarán SOLO los idénticos, conservando una copia legible de cada episodio. Los que no sean idénticos NO se tocan. ¿Continuar?');">
+                      onsubmit="return confirmAndMarkDedup(this, 'Se calculará el SHA-256 de cada archivo y se borrarán SOLO los idénticos, conservando una copia legible de cada episodio. Los que no sean idénticos NO se tocan. ¿Continuar?');">
                   {% for ep in g.episodes %}<input type="hidden" name="ids" value="{{ ep['id'] }}">{% endfor %}
-                  <button class="btn btn-danger btn-sm" type="submit">🧹 Borrar todos los duplicados idénticos (conservar uno de cada)</button>
+                  <button class="btn btn-danger btn-sm" type="submit" {% if dedup_notice.running %}disabled{% endif %}>🧹 Borrar duplicados idénticos de esta serie (conservar uno de cada)</button>
                 </form>
                 {% for dg in g.duplicate_groups %}
                   <div class="dup-group">
