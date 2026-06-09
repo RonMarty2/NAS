@@ -140,6 +140,55 @@ def _season_poster_name(season):
     return f"season{_two(season)}-poster.jpg"
 
 
+def _write_text_if_missing(path, text):
+    if os.path.exists(path):
+        return
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+
+
+def _episode_nfo(item, dest, episode_meta, include_thumb):
+    series_title = escape(str(_g(item, "chosen_title") or _g(item, "detected_title") or ""))
+    season = _safe_int(_g(item, "season"), 1)
+    episode = _safe_int(_g(item, "episode"), 1)
+    fallback_title = f"{series_title} S{_two(season)}E{_two(episode)}"
+    title = escape(str(episode_meta.get("title") or fallback_title))
+    overview = escape(str(episode_meta.get("overview") or ""))
+    aired = escape(str(episode_meta.get("aired") or ""))
+    episode_id = episode_meta.get("tmdb_id") or ""
+    thumb_name = os.path.basename(os.path.splitext(dest)[0] + "-thumb.jpg")
+    thumb_line = f"  <thumb>{thumb_name}</thumb>\n" if include_thumb else ""
+    runtime = episode_meta.get("runtime")
+    runtime_line = f"  <runtime>{runtime}</runtime>\n" if runtime else ""
+    uniqueid_line = (
+        f'  <uniqueid type="tmdb" default="true">{episode_id}</uniqueid>\n'
+        if episode_id else ""
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n<episodedetails>\n'
+        f"  <title>{title}</title>\n"
+        f"  <showtitle>{series_title}</showtitle>\n"
+        f"  <season>{season}</season>\n"
+        f"  <episode>{episode}</episode>\n"
+        f"  <plot>{overview}</plot>\n"
+        f"  <aired>{aired}</aired>\n"
+        f"{thumb_line}"
+        f"{runtime_line}"
+        f"{uniqueid_line}"
+        "</episodedetails>\n"
+    )
+
+
+def _write_episode_metadata(item, dest):
+    season = _safe_int(_g(item, "season"), 1)
+    episode = _safe_int(_g(item, "episode"), 1)
+    episode_meta = tmdb.episode_metadata(_g(item, "tmdb_id"), season, episode)
+    nfo_path = os.path.splitext(dest)[0] + ".nfo"
+    thumb_path = os.path.splitext(dest)[0] + "-thumb.jpg"
+    _save_image(episode_meta.get("still_url"), thumb_path)
+    _write_text_if_missing(nfo_path, _episode_nfo(item, dest, episode_meta, os.path.exists(thumb_path)))
+
+
 def write_metadata(item, dest):
     """Escribe .nfo (con el id de TMDB) y guarda el póster local, para que Jellyfin
     reconozca EXACTO y respete el título elegido. Mejor esfuerzo: nunca rompe el movido."""
@@ -199,6 +248,7 @@ def write_metadata(item, dest):
             if not os.path.exists(season_poster_path):
                 season_assets = tmdb.season_assets(tmdb_id, season)
                 _save_image(season_assets.get("poster"), season_poster_path)
+            _write_episode_metadata(item, dest)
     except Exception:
         pass
 

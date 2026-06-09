@@ -33,6 +33,8 @@ DELETE_DUP_STATUS_KEY = "delete_dup_status"
 DELETE_DUP_LOCK = threading.Lock()
 SCAN_STATUS_KEY = "scan_status"
 SCAN_LOCK = threading.Lock()
+LOCAL_METADATA_STATUS_KEY = "local_metadata_status"
+LOCAL_METADATA_LOCK = threading.Lock()
 
 
 @app.on_event("startup")
@@ -42,6 +44,7 @@ def _startup():
     _set_dedup_state({})
     _set_delete_dup_state({})
     _recover_scan_state()
+    _recover_local_metadata_state()
     watcher.start_background()
 
 
@@ -221,9 +224,12 @@ def _recover_scan_state():
 
 def _base_context():
     scan_notice = _scan_notice()
+    local_metadata_notice = _local_metadata_notice()
     return {
         "scan_notice": scan_notice,
         "scan_running": bool(scan_notice.get("running")),
+        "local_metadata_notice": local_metadata_notice,
+        "local_metadata_running": bool(local_metadata_notice.get("running")),
     }
 
 
@@ -270,6 +276,109 @@ def _start_scan_job():
                 "message": f"No se pudo completar el escaneo: {exc}",
                 "error": str(exc),
             })
+
+    threading.Thread(target=worker, daemon=True).start()
+    return True
+
+
+def _local_metadata_state():
+    raw = db.get_setting(LOCAL_METADATA_STATUS_KEY, "")
+    if not raw:
+        return {}
+    try:
+        state = json.loads(raw)
+    except Exception:
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _local_metadata_notice():
+    state = _local_metadata_state()
+    if not state:
+        return {"visible": False, "running": False}
+    running = bool(state.get("running"))
+    state["running"] = running
+    state["visible"] = running or bool(state.get("message"))
+    state.setdefault("message", "")
+    state.setdefault("done", 0)
+    state.setdefault("total", 0)
+    state.setdefault("errors", 0)
+    state.setdefault("current", "")
+    return state
+
+
+def _set_local_metadata_state(state):
+    db.set_setting(LOCAL_METADATA_STATUS_KEY, json.dumps(state or {}, ensure_ascii=False))
+
+
+def _recover_local_metadata_state():
+    state = _local_metadata_state()
+    if state.get("running"):
+        state.update({
+            "running": False,
+            "finished_at": _now(),
+            "message": "La generacion anterior de metadata local se interrumpio al reiniciar la app.",
+        })
+        _set_local_metadata_state(state)
+
+
+def _start_local_metadata_job():
+    started_at = _now()
+    with LOCAL_METADATA_LOCK:
+        current = _local_metadata_state()
+        if current.get("running"):
+            return False
+        items = [
+            it for it in db.list_items(status="done")
+            if it["media_type"] in ("movie", "series") and it["dest_path"]
+        ]
+        state = {
+            "running": True,
+            "started_at": started_at,
+            "message": "Generando .nfo, posters y miniaturas locales para lo ya movido...",
+            "done": 0,
+            "total": len(items),
+            "errors": 0,
+            "current": "",
+        }
+        _set_local_metadata_state(state)
+
+    def worker():
+        done = 0
+        errors = 0
+        for item in items:
+            current = item["dest_path"] or item["filename"]
+            try:
+                if item["dest_path"] and os.path.exists(item["dest_path"]):
+                    organizer.write_metadata(item, item["dest_path"])
+                else:
+                    errors += 1
+            except Exception:
+                errors += 1
+            done += 1
+            _set_local_metadata_state({
+                "running": True,
+                "started_at": started_at,
+                "message": "Generando metadata local...",
+                "done": done,
+                "total": len(items),
+                "errors": errors,
+                "current": current,
+            })
+
+        _set_local_metadata_state({
+            "running": False,
+            "started_at": started_at,
+            "finished_at": _now(),
+            "message": (
+                f"Metadata local terminada: {done - errors} archivo(s) procesado(s), "
+                f"{errors} con problema."
+            ),
+            "done": done,
+            "total": len(items),
+            "errors": errors,
+            "current": "",
+        })
 
     threading.Thread(target=worker, daemon=True).start()
     return True
@@ -688,6 +797,16 @@ def dedup_all():
         "/settings?msg=" + quote("🧹 Limpiando duplicados idénticos en segundo plano. "
                                  "Revisa las pestañas en un momento."),
         status_code=303)
+
+
+@app.post("/metadata/regenerate-local")
+def regenerate_local_metadata():
+    """Genera .nfo e imagenes locales para archivos ya movidos."""
+    _start_local_metadata_job()
+    return RedirectResponse(
+        "/settings?msg=" + quote("Generando metadata local en segundo plano."),
+        status_code=303,
+    )
 
 
 @app.post("/item/{item_id}/skip")

@@ -146,3 +146,36 @@ def season_assets(tmdb_id, season_number):
     except requests.RequestException:
         return {}
     return {"poster": _pick_image(data.get("posters"), (lang, "es", "en", None))}
+
+
+def episode_metadata(tmdb_id, season_number, episode_number):
+    """Devuelve metadata y miniatura de un episodio concreto de TMDB."""
+    if not configured() or not tmdb_id:
+        return {}
+    try:
+        season = int(season_number)
+    except (TypeError, ValueError):
+        season = 1
+    try:
+        episode = int(episode_number)
+    except (TypeError, ValueError):
+        episode = 1
+    params = {"api_key": _key(), "language": _lang()}
+    try:
+        r = requests.get(
+            f"{BASE}/tv/{tmdb_id}/season/{season}/episode/{episode}",
+            params=params,
+            timeout=8,
+        )
+        r.raise_for_status()
+        data = r.json()
+    except requests.RequestException:
+        return {}
+    return {
+        "tmdb_id": data.get("id"),
+        "title": data.get("name") or "",
+        "overview": data.get("overview") or "",
+        "aired": data.get("air_date") or "",
+        "runtime": data.get("runtime"),
+        "still_url": _image_url(data.get("still_path")),
+    }

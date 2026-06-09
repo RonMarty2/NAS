@@ -113,6 +113,16 @@
   </form>
 
   <hr>
+  <h2>Metadata local</h2>
+  <p class="meta">Genera archivos junto al video para lo que ya moviste: `tvshow.nfo`,
+    `poster.jpg`, `fanart.jpg`, `clearlogo.png`, pÃ³ster de temporada y, por episodio,
+    `.nfo` + `-thumb.jpg`. No mueve ni borra videos.</p>
+  <form method="post" action="/metadata/regenerate-local"
+        onsubmit="return confirmAndMarkSubmit(this, 'Se revisarÃ¡ el historial y se crearÃ¡ metadata local faltante. Puede tardar varios minutos. Â¿Continuar?', 'Generando...');">
+    <button class="btn btn-secondary" type="submit" {% if local_metadata_notice.running %}disabled{% endif %}>Generar metadata local de lo ya movido</button>
+  </form>
+
+  <hr>
   <h2>Mantenimiento de Jellyfin</h2>
   <p class="meta">Tras cada descarga se hace un escaneo incremental (solo lo nuevo).
     Usa este botón solo si quieres forzar un refresco completo de toda la biblioteca.</p>

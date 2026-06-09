@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NAS Organizer</title>
-  {% if has_processing or dedup_running or delete_dup_running or scan_running %}<meta http-equiv="refresh" content="6">{% endif %}
+  {% if has_processing or dedup_running or delete_dup_running or scan_running or local_metadata_running %}<meta http-equiv="refresh" content="6">{% endif %}
   <link rel="stylesheet" href="/static/style.css">
   {# ---- PWA: instalable como app con icono propio ---- #}
   <link rel="manifest" href="/static/manifest.webmanifest">
@@ -40,6 +40,22 @@
         <span>{{ scan_notice.message }}</span>
         {% if scan_notice.running %}
           <small>La pagina se actualiza sola mientras revisa descargas estables.</small>
+        {% endif %}
+      </div>
+    {% endif %}
+    {% if local_metadata_notice and local_metadata_notice.visible %}
+      <div class="scan-banner {{ 'running' if local_metadata_notice.running else 'done' }}">
+        <strong>{% if local_metadata_notice.running %}Generando metadata local{% else %}Metadata local terminada{% endif %}</strong>
+        <span>{{ local_metadata_notice.message }}</span>
+        {% if local_metadata_notice.total %}
+          <progress class="dedup-progress" value="{{ local_metadata_notice.done or 0 }}" max="{{ local_metadata_notice.total }}"></progress>
+          <small>Avance: {{ local_metadata_notice.done or 0 }}/{{ local_metadata_notice.total }}</small>
+        {% endif %}
+        {% if local_metadata_notice.errors %}
+          <small class="dedup-error">Con problemas: {{ local_metadata_notice.errors }}</small>
+        {% endif %}
+        {% if local_metadata_notice.current %}
+          <small>{{ local_metadata_notice.current }}</small>
         {% endif %}
       </div>
     {% endif %}

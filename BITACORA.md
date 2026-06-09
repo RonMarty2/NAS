@@ -366,3 +366,14 @@ Pendiente: conectar Jellyfin (URL+API key), y elegir mejoras del roadmap (§8).
   y si encontró pendientes nuevos.
 - El botón queda deshabilitado y cambia a "Buscando..." mientras hay un escaneo manual en curso,
   para evitar doble-clicks y dar feedback inmediato.
+
+### Sesión 12 — 2026-06-09 (metadata y miniaturas por episodio)
+- Se añadió metadata local por episodio para series: junto a cada MKV se crea
+  `<episodio>.nfo` y, si TMDB tiene imagen fija, `<episodio>-thumb.jpg`.
+- El `.nfo` de episodio incluye título, showtitle, temporada, episodio, sinopsis, fecha de emisión,
+  runtime y uniqueid TMDB del episodio cuando existe.
+- En Ajustes se añadió **Generar metadata local de lo ya movido**. Recorre el Historial (`done`)
+  y crea metadata/artwork faltante sin mover ni borrar videos. Sirve para carpetas como Zatch Bell
+  que ya estaban organizadas antes de esta mejora.
+- El proceso corre en segundo plano con banner de avance y reutiliza la misma escritura de metadata
+  usada al mover archivos nuevos.
