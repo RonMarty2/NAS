@@ -29,6 +29,8 @@ TABS = [
 
 DEDUP_STATUS_KEY = "dedup_status"
 DEDUP_LOCK = threading.Lock()
+DELETE_DUP_STATUS_KEY = "delete_dup_status"
+DELETE_DUP_LOCK = threading.Lock()
 
 
 @app.on_event("startup")
@@ -36,6 +38,7 @@ def _startup():
     db.init_db()
     db.reset_processing()  # recupera movimientos que quedaron a medias
     _set_dedup_state({})
+    _set_delete_dup_state({})
     watcher.start_background()
 
 
@@ -127,6 +130,32 @@ def _set_dedup_state(state):
     db.set_setting(DEDUP_STATUS_KEY, json.dumps(state or {}, ensure_ascii=False))
 
 
+def _delete_dup_state():
+    raw = db.get_setting(DELETE_DUP_STATUS_KEY, "")
+    if not raw:
+        return {}
+    try:
+        state = json.loads(raw)
+    except Exception:
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _delete_dup_notice():
+    state = _delete_dup_state()
+    if not state:
+        return {"visible": False, "running": False}
+
+    running = bool(state.get("running"))
+    state["running"] = running
+    state["visible"] = running or bool(state.get("message"))
+    return state
+
+
+def _set_delete_dup_state(state):
+    db.set_setting(DELETE_DUP_STATUS_KEY, json.dumps(state or {}, ensure_ascii=False))
+
+
 def _start_dedup_job(item_ids, scope):
     started_at = _now()
     scope_label = "de esta serie" if scope == "series" else "de toda la biblioteca pendiente"
@@ -172,6 +201,53 @@ def _start_dedup_job(item_ids, scope):
     return True
 
 
+def _start_delete_dup_job(item_id):
+    started_at = _now()
+    with DELETE_DUP_LOCK:
+        current = _delete_dup_state()
+        if current.get("running"):
+            return False
+        item = db.get_item(item_id)
+        if item:
+            db.update_item(item_id, error=None)
+        _set_delete_dup_state({
+            "running": True,
+            "item_id": item_id,
+            "started_at": started_at,
+            "message": "Verificando SHA-256 y borrando solo si es un duplicado idéntico.",
+        })
+
+    def worker():
+        try:
+            ok, message = duplicates.delete_exact_duplicate(item_id)
+            item = db.get_item(item_id)
+            if not ok and item:
+                db.update_item(item_id, error=message)
+            _set_delete_dup_state({
+                "running": False,
+                "item_id": item_id,
+                "started_at": started_at,
+                "finished_at": _now(),
+                "ok": ok,
+                "message": message,
+            })
+        except Exception as exc:
+            item = db.get_item(item_id)
+            if item:
+                db.update_item(item_id, error=f"No se pudo borrar el duplicado: {exc}")
+            _set_delete_dup_state({
+                "running": False,
+                "item_id": item_id,
+                "started_at": started_at,
+                "finished_at": _now(),
+                "ok": False,
+                "message": f"No se pudo borrar el duplicado: {exc}",
+            })
+
+    threading.Thread(target=worker, daemon=True).start()
+    return True
+
+
 @app.get("/tab/{media_type}", response_class=HTMLResponse)
 def tab(request: Request, media_type: str, dedup: int = 0):
     # Mostramos lo pendiente y lo que se está moviendo (para ver el progreso).
@@ -179,6 +255,7 @@ def tab(request: Request, media_type: str, dedup: int = 0):
     pending = db.list_items(status="pending", media_type=media_type)
     items = processing + pending
     dedup_notice = _dedup_notice()
+    delete_dup_notice = _delete_dup_notice()
 
     if media_type == "series":
         # Series: una tarjeta por serie, expandible con sus episodios.
@@ -193,7 +270,9 @@ def tab(request: Request, media_type: str, dedup: int = 0):
             "request": request, "tabs": TABS, "active": media_type, "page": "tabs",
             "groups": groups, "has_processing": bool(processing),
             "dedup_notice": dedup_notice,
+            "delete_dup_notice": delete_dup_notice,
             "dedup_running": bool(dedup_notice.get("running")),
+            "delete_dup_running": bool(delete_dup_notice.get("running")),
             "deduping": bool(dedup), "tab_counts": db.pending_counts(),
             "file_meta": _file_meta_map(items), "duplicate_map": duplicates.analyze(items),
             "target_map": target_map,
@@ -210,6 +289,8 @@ def tab(request: Request, media_type: str, dedup: int = 0):
         "target_map": _target_map(items, defaults),
         "has_processing": bool(processing),
         "dedup_running": bool(dedup_notice.get("running")),
+        "delete_dup_notice": delete_dup_notice,
+        "delete_dup_running": bool(delete_dup_notice.get("running")),
     })
 
 
@@ -265,6 +346,7 @@ def _target_check_html(summary):
 @app.get("/history", response_class=HTMLResponse)
 def history(request: Request):
     dedup_notice = _dedup_notice()
+    delete_dup_notice = _delete_dup_notice()
     done = db.list_items(status="done")
     skipped = db.list_items(status="skipped")
     errored = db.list_items(status="error")
@@ -273,18 +355,21 @@ def history(request: Request):
         "done": done, "skipped": skipped, "errored": errored, "page": "history",
         "tab_counts": db.pending_counts(),
         "dedup_running": bool(dedup_notice.get("running")),
+        "delete_dup_running": bool(delete_dup_notice.get("running")),
     })
 
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, saved: bool = False, msg: str = ""):
     dedup_notice = _dedup_notice()
+    delete_dup_notice = _delete_dup_notice()
     return templates.TemplateResponse("settings.html", {
         "request": request, "tabs": TABS, "active": "settings",
         "cfg": config.as_dict(), "saved": saved, "msg": msg, "page": "settings",
         "tab_counts": db.pending_counts(),
         "dedup_notice": dedup_notice,
         "dedup_running": bool(dedup_notice.get("running")),
+        "delete_dup_running": bool(delete_dup_notice.get("running")),
     })
 
 
@@ -435,9 +520,14 @@ def delete_duplicate(item_id: int):
     """Borra solo si hay otro pendiente con mismo destino, tamaño y SHA-256."""
     item = db.get_item(item_id)
     mt = item["media_type"] if item else "movie"
-    ok, message = duplicates.delete_exact_duplicate(item_id)
-    if not ok and item:
-        db.update_item(item_id, error=message)
+    if not item:
+        return _redirect_to_type(mt)
+    if item["status"] != "pending":
+        db.update_item(item_id, error="No se puede borrar mientras el archivo está en proceso.")
+        return _redirect_to_type(mt)
+    started = _start_delete_dup_job(item_id)
+    if not started:
+        db.update_item(item_id, error="Ya hay otro borrado de duplicado en curso.")
     return _redirect_to_type(mt)
 
 
@@ -459,6 +549,7 @@ def search_form(request: Request, item_id: int, q: str = ""):
     return templates.TemplateResponse("search_results.html", {
         "request": request, "item": item, "results": results, "q": q,
         "dedup_running": bool(_dedup_state().get("running")),
+        "delete_dup_running": bool(_delete_dup_state().get("running")),
     })
 
 
@@ -481,6 +572,7 @@ def edit_music_form(request: Request, item_id: int, q: str = ""):
     return templates.TemplateResponse("edit_music.html", {
         "request": request, "item": item, "candidates": candidates, "q": q,
         "dedup_running": bool(_dedup_state().get("running")),
+        "delete_dup_running": bool(_delete_dup_state().get("running")),
     })
 
 

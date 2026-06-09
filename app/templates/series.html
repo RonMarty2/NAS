@@ -15,6 +15,16 @@
     </div>
   {% endif %}
 
+  {% if delete_dup_notice.visible %}
+    <div class="dedup-banner {{ 'running' if delete_dup_notice.running else 'done' }}">
+      <strong>{% if delete_dup_notice.running %}Borrando un duplicado individual en segundo plano{% else %}Borrado individual terminado{% endif %}</strong>
+      <span>{{ delete_dup_notice.message }}</span>
+      {% if delete_dup_notice.running %}
+        <small>La página se actualiza sola mientras verifica SHA-256 y decide si puede borrar.</small>
+      {% endif %}
+    </div>
+  {% endif %}
+
   {% if not groups %}
     <p class="empty">No hay series por revisar. Cuando JDownloader baje episodios,
     aparecerán aquí agrupados por serie. También puedes pulsar <strong>🔄 Buscar ahora</strong>.</p>
@@ -100,10 +110,14 @@
                           <div class="dup-candidate-name" title="{{ cand.original_path }}">{{ cand.filename }}</div>
                           {% set extra_class = "file-facts-compact" %}
                           {% include "file_facts.html" %}
+                          {% if delete_dup_notice.running and delete_dup_notice.item_id == cand.id %}
+                            <p class="processing dup-working">🗑️ Verificando SHA-256 y borrando este duplicado… <small>si tarda, no está congelado.</small></p>
+                          {% endif %}
+                          {% if cand.error %}<p class="error">{{ cand.error }}</p>{% endif %}
                           {% if cand.status != 'processing' and dup.same_size_count > 1 %}
                             <form method="post" action="/item/{{ cand.id }}/delete-duplicate"
-                                  onsubmit="return confirm('Se calculará SHA-256 completo antes de borrar. Si no es idéntico, no se borrará. ¿Continuar?');">
-                              <button class="btn btn-danger btn-sm" type="submit">Verificar y borrar este</button>
+                                  onsubmit="return confirmAndMarkDelete(this, 'Se calculará SHA-256 completo antes de borrar. Si no es idéntico, no se borrará. ¿Continuar?');">
+                              <button class="btn btn-danger btn-sm" type="submit" {% if delete_dup_notice.running %}disabled{% endif %}>Verificar y borrar este</button>
                             </form>
                           {% endif %}
                         </div>
@@ -140,14 +154,15 @@
                   <td class="ep-new">
                     {{ g.title }} S{{ '%02d'|format(ep['season'] or 1) }}E{{ '%02d'|format(ep['episode'] or 1) }}
                     {% if ep['status'] == 'processing' %}<span class="processing"> · ⏳</span>{% endif %}
+                    {% if delete_dup_notice.running and delete_dup_notice.item_id == ep['id'] %}<span class="processing"> · 🗑️</span>{% endif %}
                   </td>
                   <td class="ep-actions">
                     {% if ep['status'] != 'processing' %}
                       <form method="post" action="/item/{{ ep['id'] }}/skip"><button class="btn btn-ghost btn-sm">⏭️</button></form>
                       {% if dup.exact_count > 1 or dup.same_size_count > 1 %}
                         <form method="post" action="/item/{{ ep['id'] }}/delete-duplicate"
-                              onsubmit="return confirm('Se calculará SHA-256 completo antes de borrar. Si no es idéntico, no se borrará. ¿Continuar?');">
-                          <button class="btn btn-danger btn-sm" title="Verificar y borrar duplicado exacto">🗑️</button></form>
+                              onsubmit="return confirmAndMarkDelete(this, 'Se calculará SHA-256 completo antes de borrar. Si no es idéntico, no se borrará. ¿Continuar?');">
+                          <button class="btn btn-danger btn-sm" title="Verificar y borrar duplicado exacto" {% if delete_dup_notice.running %}disabled{% endif %}>🗑️</button></form>
                       {% else %}
                         <form method="post" action="/item/{{ ep['id'] }}/delete"
                               onsubmit="return confirm('¿Borrar este archivo del disco?');">

@@ -83,6 +83,7 @@ def comparison_groups(items):
                 "original_path": item["original_path"],
                 "status": item["status"],
                 "size": size,
+                "error": item["error"],
             })
         try:
             target = organizer.leaf_path(group[0])

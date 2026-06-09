@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NAS Organizer</title>
-  {% if has_processing or dedup_running %}<meta http-equiv="refresh" content="6">{% endif %}
+  {% if has_processing or dedup_running or delete_dup_running %}<meta http-equiv="refresh" content="6">{% endif %}
   <link rel="stylesheet" href="/static/style.css">
   {# ---- PWA: instalable como app con icono propio ---- #}
   <link rel="manifest" href="/static/manifest.webmanifest">
@@ -162,15 +162,24 @@
         .then(function (data) { box.innerHTML = data.html || ""; })
         .catch(function () { box.innerHTML = ""; });
     }
-    function confirmAndMarkDedup(form, message) {
-      if (!confirm(message)) return false;
+    function markSubmitting(form, workingText) {
       var btn = form.querySelector('button[type="submit"]');
       if (btn) {
         btn.disabled = true;
         btn.dataset.originalText = btn.textContent;
-        btn.textContent = "🧹 Limpiando…";
+        btn.textContent = workingText;
       }
       return true;
+    }
+    function confirmAndMarkSubmit(form, message, workingText) {
+      if (!confirm(message)) return false;
+      return markSubmitting(form, workingText);
+    }
+    function confirmAndMarkDedup(form, message) {
+      return confirmAndMarkSubmit(form, message, "🧹 Limpiando…");
+    }
+    function confirmAndMarkDelete(form, message) {
+      return confirmAndMarkSubmit(form, message, "🗑️ Verificando…");
     }
   </script>
 </body>
