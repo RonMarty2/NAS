@@ -33,6 +33,13 @@
       <label>Palabras de basura a ignorar (separadas por comas)
         <input type="text" name="junk_patterns" value="{{ cfg['junk_patterns'] }}"
                placeholder="sample, activador, crack, trailer…"></label>
+      <label>Análisis profundo del archivo (ffprobe)
+        <select name="probe_media_info">
+          <option value="false" {{ 'selected' if cfg['probe_media_info'] in ('false','0','no','') else '' }}>No (más rápido; usa solo el nombre)</option>
+          <option value="true"  {{ 'selected' if cfg['probe_media_info'] in ('true','1','si','sí','yes','on') else '' }}>Sí (lee resolución/códec/idioma/duración reales)</option>
+        </select></label>
+      <p class="meta" style="margin-top:-.2rem">Con "Sí" obtienes datos exactos del archivo, pero
+        consume más CPU al analizar. En NAS modestos puedes dejarlo en "No".</p>
     </fieldset>
 
     <fieldset>
