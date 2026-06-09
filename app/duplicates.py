@@ -161,36 +161,150 @@ def delete_exact_duplicate(item_id):
     return True, "Duplicado exacto borrado."
 
 
-def delete_all_exact_duplicates(item_ids):
+def delete_all_exact_duplicates(item_ids, progress=None):
     """Borra EN LOTE los duplicados exactos entre los items dados.
 
     Para cada grupo que terminaría en el mismo destino, calcula el SHA-256 (una
     vez, cacheado) y, dentro de cada conjunto idéntico (mismo tamaño y hash),
     CONSERVA una copia legible y borra las demás. Nunca borra si no queda una
-    copia idéntica y legible. Devuelve (borrados, mensaje)."""
+    copia idéntica y legible.
+
+    Si se pasa `progress`, se van emitiendo actualizaciones intermedias para que
+    la UI muestre qué archivo/grupo se está revisando, cuántos archivos ya se
+    procesaron y si apareció algún error.
+    """
+
+    def emit(payload):
+        if not progress:
+            return
+        try:
+            progress(payload)
+        except Exception:
+            pass
+
+    def group_label(group):
+        try:
+            label = organizer.leaf_path(group[0])
+        except Exception:
+            label = group[0]["filename"]
+        return (label or group[0]["filename"]).replace("\\", "/")
+
     candidates = []
     for item_id in item_ids:
         item = db.get_item(item_id)
         if item and item["status"] == "pending" and os.path.exists(item["original_path"]):
             candidates.append(item)
 
+    total = len(candidates)
+    emit({
+        "phase": "preparing",
+        "done": 0,
+        "total": total,
+        "deleted": 0,
+        "errors": 0,
+        "skipped_groups": 0,
+        "groups_total": 0,
+        "groups_done": 0,
+        "current": "",
+        "message": "Preparando el borrado de duplicados idénticos.",
+    })
+
     by_leaf = {}
     for item in candidates:
         by_leaf.setdefault(_leaf_key(item), []).append(item)
 
+    duplicate_groups = [(key, group) for key, group in by_leaf.items() if len(group) > 1]
+    emit({
+        "phase": "scanning",
+        "done": 0,
+        "total": total,
+        "deleted": 0,
+        "errors": 0,
+        "skipped_groups": 0,
+        "groups_total": len(duplicate_groups),
+        "groups_done": 0,
+        "current": "",
+        "message": (
+            f"Encontrados {len(duplicate_groups)} grupo(s) con duplicados para revisar."
+            if duplicate_groups else
+            "No hay grupos con duplicados idénticos para revisar."
+        ),
+    })
+
     deleted = 0
-    for _key, group in by_leaf.items():
-        if len(group) < 2:
-            continue
+    errors = 0
+    skipped_groups = 0
+    last_error = ""
+    hashed = 0
+
+    for group_index, (_key, group) in enumerate(duplicate_groups, start=1):
+        label = group_label(group)
+        emit({
+            "phase": "group",
+            "done": hashed,
+            "total": total,
+            "deleted": deleted,
+            "errors": errors,
+            "skipped_groups": skipped_groups,
+            "groups_total": len(duplicate_groups),
+            "groups_done": group_index - 1,
+            "current": label,
+            "message": f"Revisando {group_index}/{len(duplicate_groups)}: {label}",
+        })
+
         by_hash = {}
         for item in group:
-            digest, size = ensure_hash(item)
+            emit({
+                "phase": "hashing",
+                "done": hashed,
+                "total": total,
+                "deleted": deleted,
+                "errors": errors,
+                "skipped_groups": skipped_groups,
+                "groups_total": len(duplicate_groups),
+                "groups_done": group_index - 1,
+                "current": item["filename"],
+                "message": f"Calculando SHA-256 de {item['filename']}",
+            })
+            digest, size = ensure_hash(item, force=True)
+            hashed += 1
             if digest:
                 by_hash.setdefault((digest, size), []).append(item)
+            else:
+                errors += 1
+                last_error = f"No pude calcular el SHA-256 de {item['filename']}."
+                emit({
+                    "phase": "hashing",
+                    "done": hashed,
+                    "total": total,
+                    "deleted": deleted,
+                    "errors": errors,
+                    "skipped_groups": skipped_groups,
+                    "groups_total": len(duplicate_groups),
+                    "groups_done": group_index - 1,
+                    "current": item["filename"],
+                    "last_error": last_error,
+                    "message": last_error,
+                })
+                continue
+
+            emit({
+                "phase": "hashing",
+                "done": hashed,
+                "total": total,
+                "deleted": deleted,
+                "errors": errors,
+                "skipped_groups": skipped_groups,
+                "groups_total": len(duplicate_groups),
+                "groups_done": group_index - 1,
+                "current": item["filename"],
+                "message": f"Verificados {hashed}/{total} archivo(s).",
+            })
 
         for _hs, identical in by_hash.items():
             if len(identical) < 2:
                 continue
+
             # Conservamos la primera copia que pase la validación de lectura.
             keeper = None
             for item in identical:
@@ -198,22 +312,133 @@ def delete_all_exact_duplicates(item_ids):
                     keeper = item
                     break
             if keeper is None:
-                continue  # ninguna legible: demasiado arriesgado, no tocamos nada
+                skipped_groups += 1
+                last_error = (
+                    f"No se borró {label} porque ninguna copia pasó la validación básica de lectura."
+                )
+                emit({
+                    "phase": "warning",
+                    "done": hashed,
+                    "total": total,
+                    "deleted": deleted,
+                    "errors": errors,
+                    "skipped_groups": skipped_groups,
+                    "groups_total": len(duplicate_groups),
+                    "groups_done": group_index - 1,
+                    "current": label,
+                    "last_error": last_error,
+                    "message": last_error,
+                })
+                continue
+
+            emit({
+                "phase": "deleting",
+                "done": hashed,
+                "total": total,
+                "deleted": deleted,
+                "errors": errors,
+                "skipped_groups": skipped_groups,
+                "groups_total": len(duplicate_groups),
+                "groups_done": group_index - 1,
+                "current": label,
+                "message": f"Borrando copias idénticas de {label}.",
+            })
             for victim in identical:
                 if victim["id"] == keeper["id"]:
                     continue
                 if not os.path.exists(keeper["original_path"]):
-                    break  # si el que conservamos desapareció, paramos por seguridad
+                    skipped_groups += 1
+                    last_error = (
+                        f"Se detuvo el borrado de {label} porque el archivo conservado desapareció."
+                    )
+                    emit({
+                        "phase": "warning",
+                        "done": hashed,
+                        "total": total,
+                        "deleted": deleted,
+                        "errors": errors,
+                        "skipped_groups": skipped_groups,
+                        "groups_total": len(duplicate_groups),
+                        "groups_done": group_index - 1,
+                        "current": label,
+                        "last_error": last_error,
+                        "message": last_error,
+                    })
+                    break
                 try:
                     os.remove(victim["original_path"])
                     db.delete_item(victim["id"])
                     deleted += 1
-                except OSError:
-                    pass
+                    emit({
+                        "phase": "deleting",
+                        "done": hashed,
+                        "total": total,
+                        "deleted": deleted,
+                        "errors": errors,
+                        "skipped_groups": skipped_groups,
+                        "groups_total": len(duplicate_groups),
+                        "groups_done": group_index - 1,
+                        "current": label,
+                        "message": f"Se borraron {deleted} duplicado(s) idéntico(s).",
+                    })
+                except OSError as exc:
+                    errors += 1
+                    last_error = f"No pude borrar {victim['filename']}: {exc}"
+                    emit({
+                        "phase": "warning",
+                        "done": hashed,
+                        "total": total,
+                        "deleted": deleted,
+                        "errors": errors,
+                        "skipped_groups": skipped_groups,
+                        "groups_total": len(duplicate_groups),
+                        "groups_done": group_index - 1,
+                        "current": label,
+                        "last_error": last_error,
+                        "message": last_error,
+                    })
+
+        emit({
+            "phase": "group",
+            "done": hashed,
+            "total": total,
+            "deleted": deleted,
+            "errors": errors,
+            "skipped_groups": skipped_groups,
+            "groups_total": len(duplicate_groups),
+            "groups_done": group_index,
+            "current": label,
+            "message": f"Grupo {group_index}/{len(duplicate_groups)} revisado.",
+        })
 
     if deleted:
-        return deleted, f"Se borraron {deleted} duplicado(s) idéntico(s)."
-    return 0, "No se encontraron duplicados idénticos verificados para borrar."
+        message = f"Se borraron {deleted} duplicado(s) idéntico(s)."
+        if skipped_groups:
+            message += f" {skipped_groups} grupo(s) se omitieron por seguridad."
+        if errors:
+            message += f" Hubo {errors} error(es) al borrar; revisa el detalle."
+    else:
+        if skipped_groups and not errors:
+            message = (
+                f"No se borró nada porque {skipped_groups} grupo(s) no dejaron una copia legible para conservar."
+            )
+        elif errors:
+            message = f"No se pudo completar el borrado. Hubo {errors} error(es)."
+        else:
+            message = "No se encontraron duplicados idénticos verificados para borrar."
+
+    return {
+        "deleted": deleted,
+        "errors": errors,
+        "skipped_groups": skipped_groups,
+        "done": hashed,
+        "total": total,
+        "groups_total": len(duplicate_groups),
+        "groups_done": len(duplicate_groups),
+        "message": message,
+        "last_error": last_error,
+        "phase": "done",
+    }
 
 
 def _empty():

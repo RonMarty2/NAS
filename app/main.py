@@ -116,13 +116,34 @@ def _dedup_state():
 def _dedup_notice():
     state = _dedup_state()
     if not state:
-        return {"visible": False, "running": False}
+        return {
+            "visible": False,
+            "running": False,
+            "deleted": 0,
+            "errors": 0,
+            "done": 0,
+            "total": 0,
+            "groups_total": 0,
+            "groups_done": 0,
+            "skipped_groups": 0,
+            "current": "",
+            "last_error": "",
+        }
 
     running = bool(state.get("running"))
     visible = running or bool(state.get("message"))
 
     state["running"] = running
     state["visible"] = visible
+    state.setdefault("deleted", 0)
+    state.setdefault("errors", 0)
+    state.setdefault("done", 0)
+    state.setdefault("total", 0)
+    state.setdefault("groups_total", 0)
+    state.setdefault("groups_done", 0)
+    state.setdefault("skipped_groups", 0)
+    state.setdefault("current", "")
+    state.setdefault("last_error", "")
     return state
 
 
@@ -163,39 +184,65 @@ def _start_dedup_job(item_ids, scope):
         current = _dedup_state()
         if current.get("running"):
             return False
-        _set_dedup_state({
+        state = {
             "running": True,
             "scope": scope,
             "started_at": started_at,
             "item_count": len(item_ids),
             "message": (
-                f"Calculando SHA-256 y borrando solo duplicados idénticos {scope_label}. "
-                "Esto puede tardar en un NAS pequeño."
+                f"Preparando el borrado de duplicados idénticos {scope_label}. "
+                "Se irá mostrando el avance mientras calcula SHA-256."
             ),
-        })
+            "deleted": 0,
+            "errors": 0,
+            "done": 0,
+            "total": 0,
+            "groups_total": 0,
+            "groups_done": 0,
+            "skipped_groups": 0,
+            "current": "",
+            "last_error": "",
+        }
+        _set_dedup_state(state)
 
     def worker():
+        def push(update):
+            state.update(update or {})
+            _set_dedup_state(dict(state))
+
         try:
-            deleted, message = duplicates.delete_all_exact_duplicates(item_ids)
-            _set_dedup_state({
+            result = duplicates.delete_all_exact_duplicates(item_ids, progress=push)
+            state.update({
                 "running": False,
                 "scope": scope,
                 "started_at": started_at,
                 "finished_at": _now(),
                 "item_count": len(item_ids),
-                "deleted": deleted,
-                "message": message,
+                "deleted": result.get("deleted", 0),
+                "errors": result.get("errors", 0),
+                "done": result.get("done", 0),
+                "total": result.get("total", 0),
+                "groups_total": result.get("groups_total", 0),
+                "groups_done": result.get("groups_done", result.get("groups_total", 0)),
+                "skipped_groups": result.get("skipped_groups", 0),
+                "last_error": result.get("last_error", ""),
+                "message": result.get("message", "Limpieza terminada."),
+                "phase": result.get("phase", "done"),
             })
+            _set_dedup_state(dict(state))
         except Exception as exc:
-            _set_dedup_state({
+            state.update({
                 "running": False,
                 "scope": scope,
                 "started_at": started_at,
                 "finished_at": _now(),
                 "item_count": len(item_ids),
-                "deleted": 0,
+                "deleted": state.get("deleted", 0),
                 "message": f"No se pudo limpiar duplicados: {exc}",
+                "last_error": str(exc),
+                "phase": "error",
             })
+            _set_dedup_state(dict(state))
 
     threading.Thread(target=worker, daemon=True).start()
     return True

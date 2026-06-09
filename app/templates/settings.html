@@ -91,8 +91,16 @@
     <div class="dedup-banner {{ 'running' if dedup_notice.running else 'done' }}">
       <strong>{% if dedup_notice.running %}Limpieza global en curso{% else %}Limpieza global terminada{% endif %}</strong>
       <span>{{ dedup_notice.message }}</span>
-      {% if dedup_notice.deleted is defined %}
-        <small>Borrados: {{ dedup_notice.deleted }}</small>
+      {% if dedup_notice.total %}
+        <progress class="dedup-progress" value="{{ dedup_notice.done or 0 }}" max="{{ dedup_notice.total }}"></progress>
+        <small>Avance: {{ dedup_notice.done or 0 }}/{{ dedup_notice.total }} archivo{{ 's' if (dedup_notice.total or 0) != 1 else '' }} revisado{{ 's' if (dedup_notice.total or 0) != 1 else '' }}</small>
+      {% endif %}
+      {% if dedup_notice.groups_total %}
+        <small>Grupos: {{ dedup_notice.groups_done or 0 }}/{{ dedup_notice.groups_total }}</small>
+      {% endif %}
+      <small>Borrados: {{ dedup_notice.deleted or 0 }}</small>
+      {% if dedup_notice.errors %}
+        <small class="dedup-error">Errores: {{ dedup_notice.errors }}{% if dedup_notice.last_error %} · {{ dedup_notice.last_error }}{% endif %}</small>
       {% endif %}
       {% if dedup_notice.running %}
         <small>La app seguirá respondiendo mientras calcula el hash de los archivos.</small>

@@ -298,3 +298,10 @@ Pendiente: conectar Jellyfin (URL+API key), y elegir mejoras del roadmap (§8).
   no toca archivos que no sean idÃ©nticos.
 - Se mantuvo la informaciÃ³n de estado unos segundos al terminar para que el usuario vea
   claramente que la acciÃ³n sÃ­ se ejecutÃ³.
+### Sesión 5 — 2026-06-09 (progreso visible para borrado en masa)
+- Se añadió **progreso real** al borrado en lote de duplicados: contador de archivos revisados,
+  grupos procesados, archivos borrados y el archivo/grupo actual que se está calculando.
+- La limpieza masiva ahora **recalcula SHA-256 de verdad** durante el proceso, para no depender
+  de hashes viejos y mantener la verificación segura.
+- Si algo falla, el banner ya no se queda mudo: muestra el **último error**, cuántos fallos hubo
+  y cuántos grupos se omitieron por seguridad.
