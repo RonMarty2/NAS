@@ -25,6 +25,8 @@ DEFAULTS = {
     "music_exts":    ".mp3,.flac,.m4a,.aac,.ogg,.opus,.wav,.wma",
     "subtitle_exts": ".srt,.sub,.ass,.ssa,.vtt,.idx",
     "min_size_mb":   "10",  # ignora archivos minúsculos (basura)
+    # En NAS modestos conviene dejarlo apagado: sin ffprobe solo usa nombre + peso.
+    "probe_media_info": os.environ.get("NAS_PROBE_MEDIA_INFO", "false"),
     # Palabras que marcan basura: si el nombre las contiene, se ignora el archivo.
     "junk_patterns": "sample,muestra,activador,activator,crack,keygen,rarbg,proof,trailer",
     # Notificaciones (todas opcionales; se configuran en Ajustes).

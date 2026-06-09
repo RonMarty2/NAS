@@ -9,6 +9,10 @@
 
   <div class="info">
     <div class="filename" title="{{ item['original_path'] }}">📄 {{ item["filename"] }}</div>
+    {% set meta = file_meta[item['id']] %}
+    {% set dup = duplicate_map[item['id']] %}
+    {% set target = target_map[item['id']] %}
+    {% include "file_facts.html" %}
 
     {% if item["media_type"] == "music" %}
       <h3>🎵 {{ item["detected_title"] or "Canción sin título" }}</h3>
@@ -35,23 +39,30 @@
     {% endif %}
 
     {% if item["error"] %}<p class="error">⚠️ {{ item["error"] }}</p>{% endif %}
+    {% include "duplicate_notice.html" %}
 
     {% if item["status"] == "processing" %}
       {# ---- En movimiento: nada que tocar, solo mostrar progreso ---- #}
       <p class="processing">⏳ Moviendo… <small>(si es un archivo grande puede tardar unos minutos; la página se actualiza sola)</small></p>
       <p class="preview">Destino: <span>{{ item["dest_folder"] }}/{{ leaves[item['id']] }}</span></p>
+      <form method="post" action="/item/{{ item['id'] }}/reset-processing"
+            onsubmit="return confirm('Esto solo quita el reloj y devuelve el item a pendiente. Usalo si lleva mucho tiempo sin avanzar. Continuar?');">
+        <button class="btn btn-ghost" type="submit">Revisar de nuevo</button>
+      </form>
     {% else %}
     {# ---- Selector de carpeta destino + vista previa ---- #}
     {% set leaf = leaves[item['id']] %}
     {% set base_def = defaults[item['id']] %}
-    <div class="dest-form" data-item="{{ item['id'] }}" data-leaf="{{ leaf }}">
+    <div class="dest-form" data-item="{{ item['id'] }}" data-leaf="{{ leaf }}" data-check-ids="{{ item['id'] }}">
       <div class="dest-row">
         <span>📁 Mover a:</span>
         <strong class="chosen-folder" id="chosen-{{ item['id'] }}">{{ base_def }}</strong>
         <button type="button" class="btn btn-secondary"
-                onclick="openFolderPicker({{ item['id'] }}, '{{ base_def }}')">📂 Elegir carpeta…</button>
+                onclick='openFolderPicker({{ item['id'] }}, {{ base_def|tojson }})'>📂 Elegir carpeta…</button>
       </div>
       <p class="preview">Quedará en: <span id="prev-{{ item['id'] }}">{{ base_def }}/{{ leaf }}</span></p>
+      {% set check_id = item['id'] %}
+      {% include "target_notice.html" %}
       <form method="post" action="/item/{{ item['id'] }}/confirm">
         <input type="hidden" name="dest_folder" id="dest-{{ item['id'] }}" value="{{ base_def }}">
         <button class="btn btn-primary" type="submit">✅ Confirmar y mover</button>
@@ -77,10 +88,17 @@
       <form method="post" action="/item/{{ item['id'] }}/skip">
         <button class="btn btn-ghost" type="submit">⏭️ Omitir</button>
       </form>
+      {% if target.exact_exists %}
+      <form method="post" action="/item/{{ item['id'] }}/delete"
+            onsubmit="return confirm('Este archivo final ya existe en destino. Se borrara solo el pendiente de descargas. Continuar?');">
+        <button class="btn btn-danger" type="submit">Borrar pendiente</button>
+      </form>
+      {% else %}
       <form method="post" action="/item/{{ item['id'] }}/delete"
             onsubmit="return confirm('¿Borrar el archivo del disco? Esta acción no se puede deshacer.');">
         <button class="btn btn-danger" type="submit">🗑️ Eliminar</button>
       </form>
+      {% endif %}
     </div>
     {% endif %}
   </div>

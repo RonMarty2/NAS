@@ -1,0 +1,17 @@
+{% if target %}
+  <div class="target-notice target-check" id="target-check-{{ check_id }}">
+    {% if target.exact_exists %}
+      <div class="target-warning target-warning-strong">
+        <strong>Ya existe en destino</strong>
+        <span>Ese archivo final ya está en la biblioteca. Si confirmas, la app no lo pisa: creará una copia con “(2)”.</span>
+      </div>
+    {% elif target.has_media_in_folder %}
+      <div class="target-warning">
+        <strong>Ya hay contenido en esa carpeta</strong>
+        <span>Encontré {{ target.existing_files|length }} archivo{{ 's' if target.existing_files|length != 1 else '' }} allí, por ejemplo: {{ target.existing_files[:3]|join(', ') }}</span>
+      </div>
+    {% endif %}
+  </div>
+{% else %}
+  <div class="target-notice target-check" id="target-check-{{ check_id }}"></div>
+{% endif %}

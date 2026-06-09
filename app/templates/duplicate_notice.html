@@ -1,0 +1,40 @@
+{% if dup and dup.exact_count > 1 %}
+  <div class="dup-alert dup-alert-exact">
+    <div>
+      <strong>Duplicado idéntico verificado</strong>
+      <span>{{ dup.exact_count }} archivos con mismo destino, tamaño y SHA-256{% if dup.hash_short %} · {{ dup.hash_short }}{% endif %}</span>
+    </div>
+    {% if delete_dup_notice.running and delete_dup_notice.item_id == item['id'] %}
+      <p class="processing dup-working">🗑️ Verificando SHA-256 y borrando este duplicado… <small>si tarda, no está congelado.</small></p>
+    {% endif %}
+    {% if item['status'] != 'processing' %}
+      <form method="post" action="/item/{{ item['id'] }}/delete-duplicate"
+            onsubmit="return confirmAndMarkDelete(this, 'Se volverá a verificar tamaño y SHA-256 antes de borrar. ¿Borrar este duplicado exacto?');">
+        <button class="btn btn-danger btn-sm" type="submit" {% if delete_dup_notice.running %}disabled{% endif %}>Borrar este</button>
+      </form>
+    {% endif %}
+    {% if item['error'] %}<p class="error">{{ item['error'] }}</p>{% endif %}
+  </div>
+{% elif dup and dup.same_size_count > 1 %}
+  <div class="dup-alert dup-alert-exact">
+    <div>
+      <strong>Mismo nombre final y mismo peso</strong>
+      <span>{{ dup.same_size_count }} archivos podrían ser idénticos. Al borrar se verificará SHA-256 completo y que quede otro archivo legible.</span>
+    </div>
+    {% if delete_dup_notice.running and delete_dup_notice.item_id == item['id'] %}
+      <p class="processing dup-working">🗑️ Verificando SHA-256 y borrando este duplicado… <small>si tarda, no está congelado.</small></p>
+    {% endif %}
+    {% if item['status'] != 'processing' %}
+      <form method="post" action="/item/{{ item['id'] }}/delete-duplicate"
+            onsubmit="return confirmAndMarkDelete(this, 'Se calculará SHA-256 completo antes de borrar. Si no es idéntico, no se borrará. ¿Continuar?');">
+        <button class="btn btn-danger btn-sm" type="submit" {% if delete_dup_notice.running %}disabled{% endif %}>Verificar y borrar</button>
+      </form>
+    {% endif %}
+    {% if item['error'] %}<p class="error">{{ item['error'] }}</p>{% endif %}
+  </div>
+{% elif dup and dup.similar_count > 1 %}
+  <div class="dup-alert dup-alert-possible">
+    <strong>Posible duplicado</strong>
+    <span>{{ dup.similar_count }} archivos quedarían con el mismo nombre final. Compara peso, calidad e idioma antes de mover.</span>
+  </div>
+{% endif %}

@@ -33,6 +33,13 @@
       <label>Palabras de basura a ignorar (separadas por comas)
         <input type="text" name="junk_patterns" value="{{ cfg['junk_patterns'] }}"
                placeholder="sample, activador, crack, trailer…"></label>
+      <label>Análisis profundo del archivo (ffprobe)
+        <select name="probe_media_info">
+          <option value="false" {{ 'selected' if cfg['probe_media_info'] in ('false','0','no','') else '' }}>No (más rápido; usa solo el nombre)</option>
+          <option value="true"  {{ 'selected' if cfg['probe_media_info'] in ('true','1','si','sí','yes','on') else '' }}>Sí (lee resolución/códec/idioma/duración reales)</option>
+        </select></label>
+      <p class="meta" style="margin-top:-.2rem">Con "Sí" obtienes datos exactos del archivo, pero
+        consume más CPU al analizar. En NAS modestos puedes dejarlo en "No".</p>
     </fieldset>
 
     <fieldset>
@@ -73,6 +80,36 @@
   <p class="meta">Envía un aviso de prueba a los canales que configuraste arriba (guarda primero).</p>
   <form method="post" action="/notify/test">
     <button class="btn btn-secondary" type="submit">🔔 Enviar notificación de prueba</button>
+  </form>
+
+  <hr>
+  <h2>Limpiar duplicados (todo)</h2>
+  <p class="meta">Busca en TODO lo pendiente (películas, series y música) archivos
+    <strong>idénticos</strong> y borra los repetidos, conservando una copia legible de cada uno.
+    Verifica por SHA-256 antes de borrar; lo que no sea idéntico no se toca. Corre en segundo plano.</p>
+  {% if dedup_notice.visible %}
+    <div class="dedup-banner {{ 'running' if dedup_notice.running else 'done' }}">
+      <strong>{% if dedup_notice.running %}Limpieza global en curso{% else %}Limpieza global terminada{% endif %}</strong>
+      <span>{{ dedup_notice.message }}</span>
+      {% if dedup_notice.total %}
+        <progress class="dedup-progress" value="{{ dedup_notice.done or 0 }}" max="{{ dedup_notice.total }}"></progress>
+        <small>Avance: {{ dedup_notice.done or 0 }}/{{ dedup_notice.total }} archivo{{ 's' if (dedup_notice.total or 0) != 1 else '' }} revisado{{ 's' if (dedup_notice.total or 0) != 1 else '' }}</small>
+      {% endif %}
+      {% if dedup_notice.groups_total %}
+        <small>Grupos: {{ dedup_notice.groups_done or 0 }}/{{ dedup_notice.groups_total }}</small>
+      {% endif %}
+      <small>Borrados: {{ dedup_notice.deleted or 0 }}</small>
+      {% if dedup_notice.errors %}
+        <small class="dedup-error">Errores: {{ dedup_notice.errors }}{% if dedup_notice.last_error %} · {{ dedup_notice.last_error }}{% endif %}</small>
+      {% endif %}
+      {% if dedup_notice.running %}
+        <small>La app seguirá respondiendo mientras calcula el hash de los archivos.</small>
+      {% endif %}
+    </div>
+  {% endif %}
+  <form method="post" action="/dedup-all"
+        onsubmit="return confirmAndMarkDedup(this, 'Se calculará el SHA-256 de los archivos repetidos y se borrarán SOLO los idénticos, conservando uno de cada. ¿Continuar?');">
+    <button class="btn btn-danger" type="submit" {% if dedup_notice.running %}disabled{% endif %}>🧹 Borrar duplicados idénticos de toda la biblioteca pendiente</button>
   </form>
 
   <hr>

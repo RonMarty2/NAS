@@ -7,9 +7,12 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Dependencias del sistema mínimas
+# Dependencias del sistema mínimas.
+# ffmpeg trae ffprobe: permite leer resolución/códec/idioma/duración reales del
+# archivo (no solo del nombre) y validar que un duplicado sea legible antes de borrar.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         tzdata \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

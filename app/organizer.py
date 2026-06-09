@@ -7,6 +7,7 @@ from xml.sax.saxutils import escape
 import requests
 
 from . import config
+from .metadata import tmdb
 
 # Caracteres no válidos en nombres de archivo/carpeta
 _INVALID = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -112,17 +113,31 @@ def _g(item, key):
         return None
 
 
-def _save_poster(poster_url, dest_jpg):
-    """Descarga el póster a dest_jpg si hay URL y no existe ya. Mejor esfuerzo."""
-    if not poster_url or os.path.exists(dest_jpg):
+def _safe_int(value, default=1):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _save_image(url, dest_path):
+    """Descarga una imagen remota si existe y todavía no hay archivo local."""
+    if not url or os.path.exists(dest_path):
         return
     try:
-        r = requests.get(poster_url, timeout=8)
+        r = requests.get(url, timeout=8)
         r.raise_for_status()
-        with open(dest_jpg, "wb") as f:
+        with open(dest_path, "wb") as f:
             f.write(r.content)
     except Exception:
         pass
+
+
+def _season_poster_name(season):
+    season = _safe_int(season, 1)
+    if season == 0:
+        return "season-specials-poster.jpg"
+    return f"season{_two(season)}-poster.jpg"
 
 
 def write_metadata(item, dest):
@@ -135,6 +150,7 @@ def write_metadata(item, dest):
     title = escape(str(_g(item, "chosen_title") or _g(item, "detected_title") or ""))
     year = _g(item, "chosen_year") or _g(item, "detected_year") or ""
     poster = _g(item, "poster_url")
+    overview = escape(str(_g(item, "overview") or ""))
 
     try:
         if media_type == "movie":
@@ -144,9 +160,18 @@ def write_metadata(item, dest):
                 f.write(
                     f'<?xml version="1.0" encoding="UTF-8"?>\n<movie>\n'
                     f'  <title>{title}</title>\n  <year>{year}</year>\n'
+                    f'  <plot>{overview}</plot>\n'
                     f'  <uniqueid type="tmdb" default="true">{tmdb_id}</uniqueid>\n</movie>\n'
                 )
-            _save_poster(poster, os.path.join(folder, "poster.jpg"))
+            poster_path = os.path.join(folder, "poster.jpg")
+            fanart_path = os.path.join(folder, "fanart.jpg")
+            clearlogo_path = os.path.join(folder, "clearlogo.png")
+            assets = {}
+            if not all(os.path.exists(p) for p in (poster_path, fanart_path, clearlogo_path)):
+                assets = tmdb.image_assets(media_type, tmdb_id)
+            _save_image(assets.get("poster") or poster, poster_path)
+            _save_image(assets.get("fanart"), fanart_path)
+            _save_image(assets.get("clearlogo"), clearlogo_path)
 
         elif media_type == "series":
             series_root = os.path.dirname(os.path.dirname(dest))  # …/Título
@@ -156,9 +181,24 @@ def write_metadata(item, dest):
                     f.write(
                         f'<?xml version="1.0" encoding="UTF-8"?>\n<tvshow>\n'
                         f'  <title>{title}</title>\n'
+                        f'  <plot>{overview}</plot>\n'
                         f'  <uniqueid type="tmdb" default="true">{tmdb_id}</uniqueid>\n</tvshow>\n'
                     )
-            _save_poster(poster, os.path.join(series_root, "poster.jpg"))
+            poster_path = os.path.join(series_root, "poster.jpg")
+            fanart_path = os.path.join(series_root, "fanart.jpg")
+            clearlogo_path = os.path.join(series_root, "clearlogo.png")
+            assets = {}
+            if not all(os.path.exists(p) for p in (poster_path, fanart_path, clearlogo_path)):
+                assets = tmdb.image_assets(media_type, tmdb_id)
+            _save_image(assets.get("poster") or poster, poster_path)
+            _save_image(assets.get("fanart"), fanart_path)
+            _save_image(assets.get("clearlogo"), clearlogo_path)
+
+            season = _safe_int(_g(item, "season"), 1)
+            season_poster_path = os.path.join(series_root, _season_poster_name(season))
+            if not os.path.exists(season_poster_path):
+                season_assets = tmdb.season_assets(tmdb_id, season)
+                _save_image(season_assets.get("poster"), season_poster_path)
     except Exception:
         pass
 
@@ -171,8 +211,10 @@ def move_item(item):
 
     dest = build_dest(item)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
-    # Protección anti-sobrescritura: si ya hay uno con ese nombre, no lo pisamos.
-    dest = unique_path(dest)
+    if os.path.exists(dest):
+        return False, None, (
+            f"Ya existe en destino: {dest}. No se movio para evitar crear una copia (2)."
+        )
 
     try:
         shutil.move(src, dest)

@@ -2,6 +2,37 @@
 {% block content %}
   <h1>Series pendientes</h1>
 
+  {% if dedup_notice.visible %}
+    <div class="dedup-banner {{ 'running' if dedup_notice.running else 'done' }}">
+      <strong>{% if dedup_notice.running %}Limpiando duplicados idénticos de esta serie en segundo plano{% else %}Limpieza terminada{% endif %}</strong>
+      <span>{{ dedup_notice.message }}</span>
+      {% if dedup_notice.total %}
+        <progress class="dedup-progress" value="{{ dedup_notice.done or 0 }}" max="{{ dedup_notice.total }}"></progress>
+        <small>Avance: {{ dedup_notice.done or 0 }}/{{ dedup_notice.total }} archivo{{ 's' if (dedup_notice.total or 0) != 1 else '' }} revisado{{ 's' if (dedup_notice.total or 0) != 1 else '' }}</small>
+      {% endif %}
+      {% if dedup_notice.groups_total %}
+        <small>Grupos: {{ dedup_notice.groups_done or 0 }}/{{ dedup_notice.groups_total }}</small>
+      {% endif %}
+      <small>Borrados: {{ dedup_notice.deleted or 0 }}</small>
+      {% if dedup_notice.errors %}
+        <small class="dedup-error">Errores: {{ dedup_notice.errors }}{% if dedup_notice.last_error %} · {{ dedup_notice.last_error }}{% endif %}</small>
+      {% endif %}
+      {% if dedup_notice.running %}
+        <small>Se verifica SHA-256 y se conserva una copia legible. En un NAS pequeño puede tardar varios minutos.</small>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {% if delete_dup_notice.visible %}
+    <div class="dedup-banner {{ 'running' if delete_dup_notice.running else 'done' }}">
+      <strong>{% if delete_dup_notice.running %}Borrando un duplicado individual en segundo plano{% else %}Borrado individual terminado{% endif %}</strong>
+      <span>{{ delete_dup_notice.message }}</span>
+      {% if delete_dup_notice.running %}
+        <small>La página se actualiza sola mientras verifica SHA-256 y decide si puede borrar.</small>
+      {% endif %}
+    </div>
+  {% endif %}
+
   {% if not groups %}
     <p class="empty">No hay series por revisar. Cuando JDownloader baje episodios,
     aparecerán aquí agrupados por serie. También puedes pulsar <strong>🔄 Buscar ahora</strong>.</p>
@@ -25,15 +56,37 @@
           {% endif %}
 
           {# ---- Carpeta destino para toda la serie ---- #}
-          <div class="dest-form" data-item="{{ g.gid }}" data-leaf="{{ g.title }}/Season XX/…">
+          <div class="dest-form" data-item="{{ g.gid }}" data-leaf="{{ g.title }}/Season XX/…"
+               data-check-ids="{% for ep in g.episodes %}{{ ep['id'] }}{{ ',' if not loop.last else '' }}{% endfor %}">
             <div class="dest-row">
               <span>📁 Mover a:</span>
               <strong class="chosen-folder" id="chosen-{{ g.gid }}">{{ g.default_base }}</strong>
               <button type="button" class="btn btn-secondary"
-                      onclick="openFolderPicker('{{ g.gid }}', '{{ g.default_base }}')">📂 Elegir carpeta…</button>
+                      onclick='openFolderPicker({{ g.gid|tojson }}, {{ g.default_base|tojson }})'>📂 Elegir carpeta…</button>
             </div>
             <p class="preview">Se guardarán en:
               <span id="prev-{{ g.gid }}">{{ g.default_base }}/{{ g.title }}/Season …</span></p>
+            <div class="target-notice target-check" id="target-check-{{ g.gid }}">
+              {% if g.target.exact_count %}
+                <div class="target-warning target-warning-strong">
+                  <strong>Ya existe en destino</strong>
+                  <span>{{ g.target.exact_count }} episodio{{ 's' if g.target.exact_count != 1 else '' }} ya tiene{{ 'n' if g.target.exact_count != 1 else '' }} archivo final en la biblioteca.</span>
+                </div>
+                {% if g.target_exact_pending_ids %}
+                  <form method="post" action="/series/delete-existing"
+                        onsubmit="return confirm('Se borraran de descargas solo los pendientes cuyo archivo final ya existe en Jellyfin. No toca la biblioteca. Continuar?');">
+                    {% for ep_id in g.target_exact_pending_ids %}<input type="hidden" name="ids" value="{{ ep_id }}">{% endfor %}
+                    <input type="hidden" name="dest_folder" value="{{ g.default_base }}">
+                    <button class="btn btn-danger btn-sm" type="submit">Borrar los {{ g.target_exact_pending_ids|length }} pendientes que ya existen</button>
+                  </form>
+                {% endif %}
+              {% elif g.target.folder_count %}
+                <div class="target-warning">
+                  <strong>Ya hay contenido en esa carpeta</strong>
+                  <span>{{ g.target.folder_count }} destino{{ 's' if g.target.folder_count != 1 else '' }} tiene{{ 'n' if g.target.folder_count != 1 else '' }} archivos de medios.</span>
+                </div>
+              {% endif %}
+            </div>
             <form method="post" action="/series/confirm-all">
               {% for ep in g.episodes %}<input type="hidden" name="ids" value="{{ ep['id'] }}">{% endfor %}
               <input type="hidden" name="dest_folder" id="dest-{{ g.gid }}" value="{{ g.default_base }}">
@@ -42,29 +95,114 @@
           </div>
 
           {# ---- Lista expandible de episodios (verificación) ---- #}
-          <details class="episodes">
+          <details class="episodes" id="ep-{{ g.gid }}">
             <summary>👁️ Ver y verificar los {{ g.count }} episodios</summary>
+
+            {% if g.duplicate_groups %}
+              <div class="dup-compare">
+                <h4>Comparación de duplicados</h4>
+                {% if dedup_notice.running %}
+                  <div class="dedup-banner running">
+                    <strong>La limpieza ya está en marcha</strong>
+                    <span>La página se refresca sola mientras calcula SHA-256. No borra nada que no sea idéntico.</span>
+                    {% if dedup_notice.total %}
+                      <progress class="dedup-progress" value="{{ dedup_notice.done or 0 }}" max="{{ dedup_notice.total }}"></progress>
+                      <small>Avance: {{ dedup_notice.done or 0 }}/{{ dedup_notice.total }} archivo{{ 's' if (dedup_notice.total or 0) != 1 else '' }} revisado{{ 's' if (dedup_notice.total or 0) != 1 else '' }}</small>
+                    {% endif %}
+                    {% if dedup_notice.groups_total %}
+                      <small>Grupos: {{ dedup_notice.groups_done or 0 }}/{{ dedup_notice.groups_total }}</small>
+                    {% endif %}
+                    <small>Borrados: {{ dedup_notice.deleted or 0 }}</small>
+                    {% if dedup_notice.errors %}
+                      <small class="dedup-error">Errores: {{ dedup_notice.errors }}{% if dedup_notice.last_error %} · {{ dedup_notice.last_error }}{% endif %}</small>
+                    {% endif %}
+                  </div>
+                {% endif %}
+                <form method="post" action="/series/dedup" class="dedup-all"
+                      onsubmit="return confirmAndMarkDedup(this, 'Se calculará el SHA-256 de cada archivo y se borrarán SOLO los idénticos, conservando una copia legible de cada episodio. Los que no sean idénticos NO se tocan. ¿Continuar?');">
+                  {% for ep in g.episodes %}<input type="hidden" name="ids" value="{{ ep['id'] }}">{% endfor %}
+                  <button class="btn btn-danger btn-sm" type="submit" {% if dedup_notice.running %}disabled{% endif %}>🧹 Borrar duplicados idénticos de esta serie (conservar uno de cada)</button>
+                </form>
+                {% for dg in g.duplicate_groups %}
+                  <div class="dup-group">
+                    <div class="dup-group-head">
+                      <strong>{{ dg.target_name }}</strong>
+                      <span>{{ dg.count }} archivos{% if dg.same_size %} · mismo peso{% endif %}</span>
+                    </div>
+                    <div class="dup-candidates">
+                      {% for cand in dg.entries %}
+                        {% set meta = file_meta[cand.id] %}
+                        {% set dup = duplicate_map[cand.id] %}
+                        <div class="dup-candidate">
+                          <div class="dup-candidate-name" title="{{ cand.original_path }}">{{ cand.filename }}</div>
+                          {% set extra_class = "file-facts-compact" %}
+                          {% include "file_facts.html" %}
+                          {% if delete_dup_notice.running and delete_dup_notice.item_id == cand.id %}
+                            <p class="processing dup-working">🗑️ Verificando SHA-256 y borrando este duplicado… <small>si tarda, no está congelado.</small></p>
+                          {% endif %}
+                          {% if cand.error %}<p class="error">{{ cand.error }}</p>{% endif %}
+                          {% if cand.status != 'processing' and dup.same_size_count > 1 %}
+                            <form method="post" action="/item/{{ cand.id }}/delete-duplicate"
+                                  onsubmit="return confirmAndMarkDelete(this, 'Se calculará SHA-256 completo antes de borrar. Si no es idéntico, no se borrará. ¿Continuar?');">
+                              <button class="btn btn-danger btn-sm" type="submit" {% if delete_dup_notice.running %}disabled{% endif %}>Verificar y borrar este</button>
+                            </form>
+                          {% endif %}
+                        </div>
+                      {% endfor %}
+                    </div>
+                  </div>
+                {% endfor %}
+              </div>
+            {% endif %}
+
             <table class="ep-table">
-              <thead><tr><th>Archivo original</th><th>→ Se renombrará a</th><th></th></tr></thead>
+              <thead><tr><th>Archivo original</th><th>Datos</th><th>→ Se renombrará a</th><th></th></tr></thead>
               <tbody>
               {% for ep in g.episodes %}
+                {% set meta = file_meta[ep['id']] %}
+                {% set dup = duplicate_map[ep['id']] %}
+                {% set target = target_map[ep['id']] %}
                 <tr>
                   <td class="ep-orig" title="{{ ep['original_path'] }}">{{ ep['filename'] }}</td>
+                  <td class="ep-data">
+                    {% set extra_class = "file-facts-compact" %}
+                    {% include "file_facts.html" %}
+                    {% if dup.exact_count > 1 %}
+                      <div class="ep-dup ep-dup-exact">Idéntico · SHA {{ dup.hash_short }}</div>
+                    {% elif dup.same_size_count > 1 %}
+                      <div class="ep-dup ep-dup-exact">Mismo peso · verifica SHA al borrar</div>
+                    {% elif dup.similar_count > 1 %}
+                      <div class="ep-dup ep-dup-possible">Posible duplicado</div>
+                    {% endif %}
+                    {% if target.exact_exists %}
+                      <div class="ep-dup ep-target-exists">Ya existe en destino</div>
+                    {% endif %}
+                  </td>
                   <td class="ep-new">
                     {{ g.title }} S{{ '%02d'|format(ep['season'] or 1) }}E{{ '%02d'|format(ep['episode'] or 1) }}
                     {% if ep['status'] == 'processing' %}<span class="processing"> · ⏳</span>{% endif %}
-                    <div class="ep-tech">
-                      <span class="chip">{{ ep['size_bytes']|filesizeformat }}</span>
-                      {% if ep['quality'] %}<span class="chip">{{ ep['quality'] }}</span>{% endif %}
-                      {% if ep['langs'] %}<span class="chip chip-lang">{{ ep['langs'] }}</span>{% endif %}
-                    </div>
+                    {% if delete_dup_notice.running and delete_dup_notice.item_id == ep['id'] %}<span class="processing"> · 🗑️</span>{% endif %}
                   </td>
                   <td class="ep-actions">
-                    {% if ep['status'] != 'processing' %}
+                    {% if ep['status'] == 'processing' %}
+                      <form method="post" action="/item/{{ ep['id'] }}/reset-processing"
+                            onsubmit="return confirm('Esto solo quita el reloj y devuelve el item a pendiente. Usalo si lleva mucho tiempo sin avanzar. Continuar?');">
+                        <button class="btn btn-ghost btn-sm" title="Volver a pendiente">Revisar</button></form>
+                    {% else %}
                       <form method="post" action="/item/{{ ep['id'] }}/skip"><button class="btn btn-ghost btn-sm">⏭️</button></form>
-                      <form method="post" action="/item/{{ ep['id'] }}/delete"
-                            onsubmit="return confirm('¿Borrar este archivo del disco?');">
-                        <button class="btn btn-danger btn-sm">🗑️</button></form>
+                      {% if dup.exact_count > 1 or dup.same_size_count > 1 %}
+                        <form method="post" action="/item/{{ ep['id'] }}/delete-duplicate"
+                              onsubmit="return confirmAndMarkDelete(this, 'Se calculará SHA-256 completo antes de borrar. Si no es idéntico, no se borrará. ¿Continuar?');">
+                          <button class="btn btn-danger btn-sm" title="Verificar y borrar duplicado exacto" {% if delete_dup_notice.running %}disabled{% endif %}>🗑️</button></form>
+                      {% elif target.exact_exists %}
+                        <form method="post" action="/item/{{ ep['id'] }}/delete"
+                              onsubmit="return confirm('Este archivo final ya existe en destino. Se borrara solo el pendiente de descargas. Continuar?');">
+                          <button class="btn btn-danger btn-sm" title="Borrar pendiente de descargas">Borrar pendiente</button></form>
+                      {% else %}
+                        <form method="post" action="/item/{{ ep['id'] }}/delete"
+                              onsubmit="return confirm('¿Borrar este archivo del disco?');">
+                          <button class="btn btn-danger btn-sm">🗑️</button></form>
+                      {% endif %}
                     {% endif %}
                   </td>
                 </tr>

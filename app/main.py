@@ -1,14 +1,17 @@
 """Aplicación web (FastAPI) — bandeja de revisión de descargas para Jellyfin."""
+import json
+import html
 import os
 import threading
 from typing import List
+from urllib.parse import quote
 
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import config, db, folders, jellyfin, organizer, watcher
+from . import config, db, duplicates, filemeta, folders, jellyfin, organizer, targets, watcher
 from .metadata import music as music_meta
 from .metadata import tmdb
 
@@ -24,12 +27,21 @@ TABS = [
     ("music", "Música"),
 ]
 
+DEDUP_STATUS_KEY = "dedup_status"
+DEDUP_LOCK = threading.Lock()
+DELETE_DUP_STATUS_KEY = "delete_dup_status"
+DELETE_DUP_LOCK = threading.Lock()
+SCAN_STATUS_KEY = "scan_status"
+SCAN_LOCK = threading.Lock()
+
 
 @app.on_event("startup")
 def _startup():
     db.init_db()
     db.reset_processing()  # recupera movimientos que quedaron a medias
-    watcher.backfill_tech()  # calidad/idioma para items ya existentes
+    _set_dedup_state({})
+    _set_delete_dup_state({})
+    _recover_scan_state()
     watcher.start_background()
 
 
@@ -85,19 +97,335 @@ def _group_series(items):
     return result
 
 
+def _file_meta_map(items):
+    return {it["id"]: filemeta.display_info(it) for it in items}
+
+
+def _target_map(items, defaults):
+    return {it["id"]: targets.inspect(it, defaults[it["id"]]) for it in items}
+
+
+def _dedup_state():
+    raw = db.get_setting(DEDUP_STATUS_KEY, "")
+    if not raw:
+        return {}
+    try:
+        state = json.loads(raw)
+    except Exception:
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _dedup_notice():
+    state = _dedup_state()
+    if not state:
+        return {
+            "visible": False,
+            "running": False,
+            "deleted": 0,
+            "errors": 0,
+            "done": 0,
+            "total": 0,
+            "groups_total": 0,
+            "groups_done": 0,
+            "skipped_groups": 0,
+            "current": "",
+            "last_error": "",
+        }
+
+    running = bool(state.get("running"))
+    visible = running or bool(state.get("message"))
+
+    state["running"] = running
+    state["visible"] = visible
+    state.setdefault("deleted", 0)
+    state.setdefault("errors", 0)
+    state.setdefault("done", 0)
+    state.setdefault("total", 0)
+    state.setdefault("groups_total", 0)
+    state.setdefault("groups_done", 0)
+    state.setdefault("skipped_groups", 0)
+    state.setdefault("current", "")
+    state.setdefault("last_error", "")
+    return state
+
+
+def _set_dedup_state(state):
+    db.set_setting(DEDUP_STATUS_KEY, json.dumps(state or {}, ensure_ascii=False))
+
+
+def _delete_dup_state():
+    raw = db.get_setting(DELETE_DUP_STATUS_KEY, "")
+    if not raw:
+        return {}
+    try:
+        state = json.loads(raw)
+    except Exception:
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _delete_dup_notice():
+    state = _delete_dup_state()
+    if not state:
+        return {"visible": False, "running": False}
+
+    running = bool(state.get("running"))
+    state["running"] = running
+    state["visible"] = running or bool(state.get("message"))
+    return state
+
+
+def _set_delete_dup_state(state):
+    db.set_setting(DELETE_DUP_STATUS_KEY, json.dumps(state or {}, ensure_ascii=False))
+
+
+def _scan_state():
+    raw = db.get_setting(SCAN_STATUS_KEY, "")
+    if not raw:
+        return {}
+    try:
+        state = json.loads(raw)
+    except Exception:
+        return {}
+    return state if isinstance(state, dict) else {}
+
+
+def _scan_notice():
+    state = _scan_state()
+    if not state:
+        return {"visible": False, "running": False}
+    running = bool(state.get("running"))
+    state["running"] = running
+    state["visible"] = running or bool(state.get("message"))
+    state.setdefault("message", "")
+    state.setdefault("seen", 0)
+    state.setdefault("new_pending", 0)
+    return state
+
+
+def _set_scan_state(state):
+    db.set_setting(SCAN_STATUS_KEY, json.dumps(state or {}, ensure_ascii=False))
+
+
+def _recover_scan_state():
+    state = _scan_state()
+    if state.get("running"):
+        state.update({
+            "running": False,
+            "finished_at": _now(),
+            "message": "El escaneo anterior se interrumpio al reiniciar la app. Pulsa Buscar ahora para intentarlo de nuevo.",
+        })
+        _set_scan_state(state)
+
+
+def _base_context():
+    scan_notice = _scan_notice()
+    return {
+        "scan_notice": scan_notice,
+        "scan_running": bool(scan_notice.get("running")),
+    }
+
+
+def _start_scan_job():
+    started_at = _now()
+    with SCAN_LOCK:
+        current = _scan_state()
+        if current.get("running"):
+            return False
+        before_counts = db.pending_counts()
+        before_total = sum(before_counts.values())
+        state = {
+            "running": True,
+            "started_at": started_at,
+            "message": "Buscando archivos nuevos en la carpeta de descargas...",
+            "seen": 0,
+            "new_pending": 0,
+        }
+        _set_scan_state(state)
+
+    def worker():
+        try:
+            seen = watcher.scan_once()
+            after_counts = db.pending_counts()
+            after_total = sum(after_counts.values())
+            new_pending = max(0, after_total - before_total)
+            if new_pending:
+                message = f"Escaneo terminado: {new_pending} pendiente(s) nuevo(s). Revise {seen} archivo(s)."
+            else:
+                message = f"Escaneo terminado: revise {seen} archivo(s). No encontre pendientes nuevos."
+            _set_scan_state({
+                "running": False,
+                "started_at": started_at,
+                "finished_at": _now(),
+                "message": message,
+                "seen": seen,
+                "new_pending": new_pending,
+            })
+        except Exception as exc:
+            _set_scan_state({
+                "running": False,
+                "started_at": started_at,
+                "finished_at": _now(),
+                "message": f"No se pudo completar el escaneo: {exc}",
+                "error": str(exc),
+            })
+
+    threading.Thread(target=worker, daemon=True).start()
+    return True
+
+
+def _start_dedup_job(item_ids, scope):
+    started_at = _now()
+    scope_label = "de esta serie" if scope == "series" else "de toda la biblioteca pendiente"
+    with DEDUP_LOCK:
+        current = _dedup_state()
+        if current.get("running"):
+            return False
+        state = {
+            "running": True,
+            "scope": scope,
+            "started_at": started_at,
+            "item_count": len(item_ids),
+            "message": (
+                f"Preparando el borrado de duplicados idénticos {scope_label}. "
+                "Se irá mostrando el avance mientras calcula SHA-256."
+            ),
+            "deleted": 0,
+            "errors": 0,
+            "done": 0,
+            "total": 0,
+            "groups_total": 0,
+            "groups_done": 0,
+            "skipped_groups": 0,
+            "current": "",
+            "last_error": "",
+        }
+        _set_dedup_state(state)
+
+    def worker():
+        def push(update):
+            state.update(update or {})
+            _set_dedup_state(dict(state))
+
+        try:
+            result = duplicates.delete_all_exact_duplicates(item_ids, progress=push)
+            state.update({
+                "running": False,
+                "scope": scope,
+                "started_at": started_at,
+                "finished_at": _now(),
+                "item_count": len(item_ids),
+                "deleted": result.get("deleted", 0),
+                "errors": result.get("errors", 0),
+                "done": result.get("done", 0),
+                "total": result.get("total", 0),
+                "groups_total": result.get("groups_total", 0),
+                "groups_done": result.get("groups_done", result.get("groups_total", 0)),
+                "skipped_groups": result.get("skipped_groups", 0),
+                "last_error": result.get("last_error", ""),
+                "message": result.get("message", "Limpieza terminada."),
+                "phase": result.get("phase", "done"),
+            })
+            _set_dedup_state(dict(state))
+        except Exception as exc:
+            state.update({
+                "running": False,
+                "scope": scope,
+                "started_at": started_at,
+                "finished_at": _now(),
+                "item_count": len(item_ids),
+                "deleted": state.get("deleted", 0),
+                "message": f"No se pudo limpiar duplicados: {exc}",
+                "last_error": str(exc),
+                "phase": "error",
+            })
+            _set_dedup_state(dict(state))
+
+    threading.Thread(target=worker, daemon=True).start()
+    return True
+
+
+def _start_delete_dup_job(item_id):
+    started_at = _now()
+    with DELETE_DUP_LOCK:
+        current = _delete_dup_state()
+        if current.get("running"):
+            return False
+        item = db.get_item(item_id)
+        if item:
+            db.update_item(item_id, error=None)
+        _set_delete_dup_state({
+            "running": True,
+            "item_id": item_id,
+            "started_at": started_at,
+            "message": "Verificando SHA-256 y borrando solo si es un duplicado idéntico.",
+        })
+
+    def worker():
+        try:
+            ok, message = duplicates.delete_exact_duplicate(item_id)
+            item = db.get_item(item_id)
+            if not ok and item:
+                db.update_item(item_id, error=message)
+            _set_delete_dup_state({
+                "running": False,
+                "item_id": item_id,
+                "started_at": started_at,
+                "finished_at": _now(),
+                "ok": ok,
+                "message": message,
+            })
+        except Exception as exc:
+            item = db.get_item(item_id)
+            if item:
+                db.update_item(item_id, error=f"No se pudo borrar el duplicado: {exc}")
+            _set_delete_dup_state({
+                "running": False,
+                "item_id": item_id,
+                "started_at": started_at,
+                "finished_at": _now(),
+                "ok": False,
+                "message": f"No se pudo borrar el duplicado: {exc}",
+            })
+
+    threading.Thread(target=worker, daemon=True).start()
+    return True
+
+
 @app.get("/tab/{media_type}", response_class=HTMLResponse)
-def tab(request: Request, media_type: str):
+def tab(request: Request, media_type: str, dedup: int = 0):
     # Mostramos lo pendiente y lo que se está moviendo (para ver el progreso).
     processing = db.list_items(status="processing", media_type=media_type)
     pending = db.list_items(status="pending", media_type=media_type)
     items = processing + pending
+    dedup_notice = _dedup_notice()
+    delete_dup_notice = _delete_dup_notice()
 
     if media_type == "series":
         # Series: una tarjeta por serie, expandible con sus episodios.
         groups = _group_series(items)
+        target_map = {}
+        for g in groups:
+            g["target"] = targets.inspect_many(g["episodes"], g["default_base"])
+            g["duplicate_groups"] = duplicates.comparison_groups(g["episodes"])
+            g["target_exact_pending_ids"] = []
+            for ep in g["episodes"]:
+                target = targets.inspect(ep, g["default_base"])
+                target_map[ep["id"]] = target
+                if ep["status"] == "pending" and target["exact_exists"]:
+                    g["target_exact_pending_ids"].append(ep["id"])
         return templates.TemplateResponse("series.html", {
             "request": request, "tabs": TABS, "active": media_type, "page": "tabs",
             "groups": groups, "has_processing": bool(processing),
+            **_base_context(),
+            "dedup_notice": dedup_notice,
+            "delete_dup_notice": delete_dup_notice,
+            "dedup_running": bool(dedup_notice.get("running")),
+            "delete_dup_running": bool(delete_dup_notice.get("running")),
+            "deduping": bool(dedup), "tab_counts": db.pending_counts(),
+            "file_meta": _file_meta_map(items), "duplicate_map": duplicates.analyze(items),
+            "target_map": target_map,
         })
 
     leaves = {it["id"]: organizer.leaf_path(it) for it in items}
@@ -105,9 +433,15 @@ def tab(request: Request, media_type: str):
                 for it in items}
     return templates.TemplateResponse("index.html", {
         "request": request, "tabs": TABS, "active": media_type,
-        "items": items, "page": "tabs",
+        "items": items, "page": "tabs", "tab_counts": db.pending_counts(),
+        **_base_context(),
         "leaves": leaves, "defaults": defaults,
+        "file_meta": _file_meta_map(items), "duplicate_map": duplicates.analyze(items),
+        "target_map": _target_map(items, defaults),
         "has_processing": bool(processing),
+        "dedup_running": bool(dedup_notice.get("running")),
+        "delete_dup_notice": delete_dup_notice,
+        "delete_dup_running": bool(delete_dup_notice.get("running")),
     })
 
 
@@ -117,22 +451,78 @@ def api_folders(path: str = ""):
     return folders.browse(path)
 
 
+@app.get("/api/target-check")
+def api_target_check(ids: str = "", dest_folder: str = ""):
+    """Comprueba si el destino elegido ya tiene archivos sin mover nada."""
+    base = dest_folder.strip()
+    item_ids = []
+    for raw in ids.split(","):
+        raw = raw.strip()
+        if raw.isdigit():
+            item_ids.append(int(raw))
+    items = [db.get_item(item_id) for item_id in item_ids]
+    items = [it for it in items if it]
+    if not base or not items:
+        return {"ok": False, "html": ""}
+    if not folders.within_roots(base):
+        return {"ok": False, "html": "<div class=\"target-warning target-warning-strong\"><strong>Destino no permitido</strong><span>La carpeta está fuera de las raíces configuradas.</span></div>"}
+    summary = targets.inspect_many(items, base)
+    return {"ok": True, "html": _target_check_html(summary)}
+
+
+def _target_check_html(summary):
+    examples = html.escape(", ".join(summary["examples"]))
+    if summary["exact_count"]:
+        plural = "s" if summary["exact_count"] != 1 else ""
+        return (
+            '<div class="target-warning target-warning-strong">'
+            '<strong>Ya existe en destino</strong>'
+            f'<span>{summary["exact_count"]} archivo{plural} final{plural} ya existe{"" if summary["exact_count"] == 1 else "n"}. '
+            'Si confirmas, la app no pisa nada: creará copia con “(2)”.'
+            + (f' Ejemplo: {examples}.' if examples else '')
+            + '</span></div>'
+        )
+    if summary["folder_count"]:
+        plural = "s" if summary["folder_count"] != 1 else ""
+        return (
+            '<div class="target-warning">'
+            '<strong>Ya hay contenido en esa carpeta</strong>'
+            f'<span>{summary["folder_count"]} destino{plural} tiene{"" if summary["folder_count"] == 1 else "n"} archivos de medios. '
+            + (f'Ejemplo: {examples}.' if examples else 'Revisa antes de mover.')
+            + '</span></div>'
+        )
+    return ""
+
+
 @app.get("/history", response_class=HTMLResponse)
 def history(request: Request):
+    dedup_notice = _dedup_notice()
+    delete_dup_notice = _delete_dup_notice()
     done = db.list_items(status="done")
     skipped = db.list_items(status="skipped")
     errored = db.list_items(status="error")
     return templates.TemplateResponse("history.html", {
         "request": request, "tabs": TABS, "active": "history",
         "done": done, "skipped": skipped, "errored": errored, "page": "history",
+        "tab_counts": db.pending_counts(),
+        **_base_context(),
+        "dedup_running": bool(dedup_notice.get("running")),
+        "delete_dup_running": bool(delete_dup_notice.get("running")),
     })
 
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, saved: bool = False, msg: str = ""):
+    dedup_notice = _dedup_notice()
+    delete_dup_notice = _delete_dup_notice()
     return templates.TemplateResponse("settings.html", {
         "request": request, "tabs": TABS, "active": "settings",
         "cfg": config.as_dict(), "saved": saved, "msg": msg, "page": "settings",
+        "tab_counts": db.pending_counts(),
+        **_base_context(),
+        "dedup_notice": dedup_notice,
+        "dedup_running": bool(dedup_notice.get("running")),
+        "delete_dup_running": bool(delete_dup_notice.get("running")),
     })
 
 
@@ -144,6 +534,7 @@ def settings_save(
     tmdb_api_key: str = Form(""), jellyfin_url: str = Form(""),
     jellyfin_api_key: str = Form(""), metadata_language: str = Form("es-MX"),
     min_size_mb: str = Form("10"), junk_patterns: str = Form(""),
+    probe_media_info: str = Form("false"),
     app_url: str = Form(""), ntfy_server: str = Form(""), ntfy_topic: str = Form(""),
     discord_webhook: str = Form(""), telegram_token: str = Form(""),
     telegram_chat_id: str = Form(""),
@@ -155,11 +546,14 @@ def settings_save(
         "tmdb_api_key": tmdb_api_key, "jellyfin_url": jellyfin_url,
         "jellyfin_api_key": jellyfin_api_key, "metadata_language": metadata_language,
         "min_size_mb": min_size_mb, "junk_patterns": junk_patterns,
+        "probe_media_info": probe_media_info,
         "app_url": app_url, "ntfy_server": ntfy_server, "ntfy_topic": ntfy_topic,
         "discord_webhook": discord_webhook, "telegram_token": telegram_token,
         "telegram_chat_id": telegram_chat_id,
     }.items():
         config.set(key, val.strip())
+    # Al guardar (p.ej. tras poner la API key) reintentamos identificar lo pendiente.
+    db.reset_match_attempts()
     return RedirectResponse("/settings?saved=true", status_code=303)
 
 
@@ -181,6 +575,26 @@ def _redirect_to_type(media_type):
     return RedirectResponse(f"/tab/{media_type}", status_code=303)
 
 
+DEST_EXISTS_ERROR = (
+    "Ya existe en destino. No se movio para evitar crear una copia (2). "
+    "Si ese episodio ya esta correcto en Jellyfin, borra este pendiente de descargas."
+)
+
+
+def _destination_exists(item, dest_folder):
+    return targets.inspect(item, dest_folder)["exact_exists"]
+
+
+def _delete_item_file_and_record(item):
+    if item and os.path.exists(item["original_path"]):
+        try:
+            os.remove(item["original_path"])
+        except OSError:
+            pass
+    if item:
+        db.delete_item(item["id"])
+
+
 def _do_move(item_id):
     """Mueve el archivo en segundo plano (puede tardar si hay que copiar GB) y
     actualiza el estado al terminar. Así la web no se queda congelada."""
@@ -192,6 +606,8 @@ def _do_move(item_id):
         db.update_item(item_id, status="done", dest_path=dest,
                        processed_at=_now(), error=None)
         jellyfin.refresh_incremental()  # escaneo incremental (solo nuevos)
+    elif message and message.startswith("Ya existe en destino"):
+        db.update_item(item_id, status="pending", error=message)
     else:
         db.update_item(item_id, status="error", error=message)
 
@@ -208,6 +624,10 @@ def confirm(item_id: int, dest_folder: str = Form(""), new_subfolder: str = Form
     if target is None:
         db.update_item(item_id, status="error",
                        error="La carpeta destino está fuera de las rutas permitidas.")
+        return _redirect_to_type(item["media_type"])
+    if _destination_exists(item, target):
+        db.update_item(item_id, dest_folder=target, status="pending",
+                       error=DEST_EXISTS_ERROR)
         return _redirect_to_type(item["media_type"])
 
     # Marcamos como "procesando" y movemos en segundo plano (no bloquea la página).
@@ -228,9 +648,46 @@ def confirm_series(ids: List[int] = Form(...), dest_folder: str = Form(""),
         item = db.get_item(item_id)
         if not item or item["status"] != "pending":
             continue
+        if _destination_exists(item, target):
+            db.update_item(item_id, dest_folder=target, status="pending",
+                           error=DEST_EXISTS_ERROR)
+            continue
         db.update_item(item_id, dest_folder=target, status="processing", error=None)
         threading.Thread(target=_do_move, args=(item_id,), daemon=True).start()
     return _redirect_to_type("series")
+
+
+@app.post("/series/delete-existing")
+def delete_existing_series(ids: List[int] = Form(...), dest_folder: str = Form("")):
+    """Borra pendientes de descargas solo cuando el archivo final ya existe."""
+    base = dest_folder.strip() or organizer.default_base("series")
+    for item_id in ids:
+        item = db.get_item(item_id)
+        if not item or item["status"] != "pending":
+            continue
+        if _destination_exists(item, base):
+            _delete_item_file_and_record(item)
+    return _redirect_to_type("series")
+
+
+@app.post("/series/dedup")
+def dedup_series(ids: List[int] = Form(...)):
+    """Borra en lote los duplicados idénticos (SHA-256), conservando uno de cada.
+
+    Se hace en segundo plano porque puede leer varios GB para verificar."""
+    _start_dedup_job(list(ids), "series")
+    return RedirectResponse("/tab/series", status_code=303)
+
+
+@app.post("/dedup-all")
+def dedup_all():
+    """Borra en lote los duplicados idénticos de TODO lo pendiente (en segundo plano)."""
+    ids = [it["id"] for it in db.list_items(status="pending")]
+    _start_dedup_job(ids, "all")
+    return RedirectResponse(
+        "/settings?msg=" + quote("🧹 Limpiando duplicados idénticos en segundo plano. "
+                                 "Revisa las pestañas en un momento."),
+        status_code=303)
 
 
 @app.post("/item/{item_id}/skip")
@@ -245,18 +702,47 @@ def delete(item_id: int):
     """Borra el archivo del disco y el registro."""
     item = db.get_item(item_id)
     mt = item["media_type"] if item else "movie"
-    if item and os.path.exists(item["original_path"]):
-        try:
-            os.remove(item["original_path"])
-        except OSError:
-            pass
-    db.delete_item(item_id)
+    _delete_item_file_and_record(item)
+    return _redirect_to_type(mt)
+
+
+@app.post("/item/{item_id}/reset-processing")
+def reset_processing_item(item_id: int):
+    """Devuelve un item atascado en 'processing' a pendiente para poder revisarlo."""
+    item = db.get_item(item_id)
+    if not item:
+        return RedirectResponse("/", status_code=303)
+    if item["status"] == "processing":
+        db.update_item(
+            item_id,
+            status="pending",
+            error="Se devolvio a pendiente. Revisa el destino antes de mover o borrar.",
+        )
+    return _redirect_to_type(item["media_type"])
+
+
+@app.post("/item/{item_id}/delete-duplicate")
+def delete_duplicate(item_id: int):
+    """Borra solo si hay otro pendiente con mismo destino, tamaño y SHA-256."""
+    item = db.get_item(item_id)
+    mt = item["media_type"] if item else "movie"
+    if not item:
+        return _redirect_to_type(mt)
+    if item["status"] != "pending":
+        db.update_item(item_id, error="No se puede borrar mientras el archivo está en proceso.")
+        return _redirect_to_type(mt)
+    started = _start_delete_dup_job(item_id)
+    if not started:
+        db.update_item(item_id, error="Ya hay otro borrado de duplicado en curso.")
     return _redirect_to_type(mt)
 
 
 @app.post("/item/{item_id}/type")
 def change_type(item_id: int, media_type: str = Form(...)):
     db.update_item(item_id, media_type=media_type)
+    # Re-identifica en segundo plano (temporada/episodio + búsqueda TMDB del nuevo tipo).
+    threading.Thread(target=watcher.reidentify, args=(item_id, media_type),
+                     daemon=True).start()
     return _redirect_to_type(media_type)
 
 
@@ -268,6 +754,9 @@ def search_form(request: Request, item_id: int, q: str = ""):
         results = tmdb.search(q, item["media_type"])
     return templates.TemplateResponse("search_results.html", {
         "request": request, "item": item, "results": results, "q": q,
+        **_base_context(),
+        "dedup_running": bool(_dedup_state().get("running")),
+        "delete_dup_running": bool(_delete_dup_state().get("running")),
     })
 
 
@@ -289,6 +778,9 @@ def edit_music_form(request: Request, item_id: int, q: str = ""):
     candidates = music_meta.search_candidates(q) if q else []
     return templates.TemplateResponse("edit_music.html", {
         "request": request, "item": item, "candidates": candidates, "q": q,
+        **_base_context(),
+        "dedup_running": bool(_dedup_state().get("running")),
+        "delete_dup_running": bool(_delete_dup_state().get("running")),
     })
 
 
@@ -308,10 +800,15 @@ def edit_music_save(item_id: int, artist: str = Form(""), album: str = Form(""),
 # ---------------- Acciones globales ----------------
 
 @app.post("/scan")
-def manual_scan():
+def manual_scan(from_tab: str = Form("")):
     # En segundo plano: buscar metadatos puede tardar si la red está lenta,
     # así que no bloqueamos la página.
-    threading.Thread(target=watcher.scan_once, daemon=True).start()
+    _start_scan_job()
+    # Volvemos a donde estaba el usuario (no siempre a Películas).
+    if from_tab in ("movie", "series", "music"):
+        return RedirectResponse(f"/tab/{from_tab}", status_code=303)
+    if from_tab in ("history", "settings"):
+        return RedirectResponse(f"/{from_tab}", status_code=303)
     return RedirectResponse("/", status_code=303)
 
 

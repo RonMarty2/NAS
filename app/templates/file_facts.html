@@ -1,0 +1,7 @@
+{% if meta and meta.facts %}
+  <div class="file-facts {{ extra_class|default('') }}">
+    {% for fact in meta.facts %}
+      <span>{{ fact }}</span>
+    {% endfor %}
+  </div>
+{% endif %}

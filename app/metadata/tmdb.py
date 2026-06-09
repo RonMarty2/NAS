@@ -8,6 +8,7 @@ from .. import config
 
 BASE = "https://api.themoviedb.org/3"
 IMG = "https://image.tmdb.org/t/p/w342"
+IMG_ORIGINAL = "https://image.tmdb.org/t/p/original"
 
 
 def _key():
@@ -78,3 +79,70 @@ def best_match(query, media_type, year=None):
         if deleeted and deleeted != query:
             results = search(deleeted, media_type, year)
     return results[0] if results else None
+
+
+def _image_url(path):
+    return (IMG_ORIGINAL + path) if path else None
+
+
+def _pick_image(items, preferred_languages=None):
+    """Elige una imagen priorizando idioma y votos. Devuelve URL original o None."""
+    if not items:
+        return None
+    langs = preferred_languages or ("es", "en", None)
+    ranked = sorted(
+        items,
+        key=lambda x: (
+            (x.get("iso_639_1") not in langs),
+            langs.index(x.get("iso_639_1")) if x.get("iso_639_1") in langs else 99,
+            -(x.get("vote_average") or 0),
+            -(x.get("vote_count") or 0),
+        ),
+    )
+    return _image_url(ranked[0].get("file_path"))
+
+
+def image_assets(media_type, tmdb_id):
+    """Devuelve imágenes locales útiles para Jellyfin: poster, fanart y clearlogo."""
+    if not configured() or not tmdb_id:
+        return {}
+    tmdb_type = "movie" if media_type == "movie" else "tv"
+    lang = (_lang() or "es")[:2]
+    params = {
+        "api_key": _key(),
+        "include_image_language": f"{lang},es,en,null",
+    }
+    try:
+        r = requests.get(f"{BASE}/{tmdb_type}/{tmdb_id}/images", params=params, timeout=8)
+        r.raise_for_status()
+        data = r.json()
+    except requests.RequestException:
+        return {}
+    languages = (lang, "es", "en", None)
+    return {
+        "poster": _pick_image(data.get("posters"), languages),
+        "fanart": _pick_image(data.get("backdrops"), languages),
+        "clearlogo": _pick_image(data.get("logos"), languages),
+    }
+
+
+def season_assets(tmdb_id, season_number):
+    """Devuelve imágenes para una temporada concreta de una serie."""
+    if not configured() or not tmdb_id:
+        return {}
+    try:
+        season = int(season_number)
+    except (TypeError, ValueError):
+        season = 1
+    lang = (_lang() or "es")[:2]
+    params = {
+        "api_key": _key(),
+        "include_image_language": f"{lang},es,en,null",
+    }
+    try:
+        r = requests.get(f"{BASE}/tv/{tmdb_id}/season/{season}/images", params=params, timeout=8)
+        r.raise_for_status()
+        data = r.json()
+    except requests.RequestException:
+        return {}
+    return {"poster": _pick_image(data.get("posters"), (lang, "es", "en", None))}

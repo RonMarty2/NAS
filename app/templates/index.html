@@ -2,6 +2,16 @@
 {% block content %}
   <h1>{% for k, l in tabs %}{% if k == active %}{{ l }}{% endif %}{% endfor %} pendientes</h1>
 
+  {% if delete_dup_notice.visible %}
+    <div class="dedup-banner {{ 'running' if delete_dup_notice.running else 'done' }}">
+      <strong>{% if delete_dup_notice.running %}Borrando un duplicado individual en segundo plano{% else %}Borrado individual terminado{% endif %}</strong>
+      <span>{{ delete_dup_notice.message }}</span>
+      {% if delete_dup_notice.running %}
+        <small>La página se actualiza sola mientras verifica SHA-256 y decide si puede borrar.</small>
+      {% endif %}
+    </div>
+  {% endif %}
+
   {% if not items %}
     <p class="empty">No hay nada por revisar aquí. Cuando JDownloader termine una descarga,
     aparecerá automáticamente. También puedes pulsar <strong>🔄 Buscar ahora</strong>.</p>

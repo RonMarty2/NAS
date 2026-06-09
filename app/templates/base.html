@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NAS Organizer</title>
-  {% if has_processing %}<meta http-equiv="refresh" content="6">{% endif %}
+  {% if has_processing or dedup_running or delete_dup_running or scan_running %}<meta http-equiv="refresh" content="6">{% endif %}
   <link rel="stylesheet" href="/static/style.css">
   {# ---- PWA: instalable como app con icono propio ---- #}
   <link rel="manifest" href="/static/manifest.webmanifest">
@@ -20,17 +20,29 @@
     <div class="brand">📦 NAS Organizer</div>
     <nav class="tabs">
       {% for key, label in tabs %}
-        <a class="tab {{ 'active' if active == key else '' }}" href="/tab/{{ key }}">{{ label }}</a>
+        <a class="tab {{ 'active' if active == key else '' }}" href="/tab/{{ key }}">{{ label }}{% if tab_counts and tab_counts.get(key) %} <span class="tab-count">{{ tab_counts.get(key) }}</span>{% endif %}</a>
       {% endfor %}
       <a class="tab {{ 'active' if active == 'history' else '' }}" href="/history">Historial</a>
       <a class="tab {{ 'active' if active == 'settings' else '' }}" href="/settings">Ajustes</a>
     </nav>
-    <form method="post" action="/scan" class="scan-form">
-      <button type="submit" class="btn btn-secondary" title="Revisar la carpeta de descargas ahora">🔄 Buscar ahora</button>
+    <form method="post" action="/scan" class="scan-form" onsubmit="return markSubmitting(this, 'Buscando...');">
+      <input type="hidden" name="from_tab" value="{{ active }}">
+      <button type="submit" class="btn btn-secondary" title="Revisar la carpeta de descargas ahora" {% if scan_running %}disabled{% endif %}>
+        {% if scan_running %}Buscando...{% else %}🔄 Buscar ahora{% endif %}
+      </button>
     </form>
   </header>
 
   <main>
+    {% if scan_notice and scan_notice.visible %}
+      <div class="scan-banner {{ 'running' if scan_notice.running else 'done' }}">
+        <strong>{% if scan_notice.running %}Buscando archivos nuevos{% else %}Busqueda terminada{% endif %}</strong>
+        <span>{{ scan_notice.message }}</span>
+        {% if scan_notice.running %}
+          <small>La pagina se actualiza sola mientras revisa descargas estables.</small>
+        {% endif %}
+      </div>
+    {% endif %}
     {% block content %}{% endblock %}
   </main>
 
@@ -58,6 +70,29 @@
     if ("serviceWorker" in navigator && window.isSecureContext) {
       navigator.serviceWorker.register("/sw.js").catch(function () {});
     }
+
+    // Conserva la posición de scroll y los episodios abiertos al auto-recargarse
+    // (cuando algo se está moviendo), para que la página no "salte".
+    (function () {
+      try {
+        var KEY = "nas-ui-" + location.pathname;
+        var saved = JSON.parse(sessionStorage.getItem(KEY) || "{}");
+        if (saved.t && (Date.now() - saved.t) < 15000) {
+          (saved.open || []).forEach(function (id) {
+            var d = document.getElementById(id); if (d) d.open = true;
+          });
+          if (saved.scroll) window.scrollTo(0, saved.scroll);
+        }
+        window.addEventListener("beforeunload", function () {
+          var open = [];
+          document.querySelectorAll("details[id]").forEach(function (d) {
+            if (d.open) open.push(d.id);
+          });
+          sessionStorage.setItem(KEY, JSON.stringify(
+            { open: open, scroll: window.scrollY, t: Date.now() }));
+        });
+      } catch (e) {}
+    })();
 
     var fmItem = null, fmPath = "";
 
@@ -123,7 +158,39 @@
       var leaf = cont ? cont.getAttribute("data-leaf") : "";
       var prev = document.getElementById("prev-" + fmItem);
       if (prev) prev.textContent = path + "/" + leaf;
+      refreshTargetCheck(fmItem, path);
       closeFolderPicker();
+    }
+    function refreshTargetCheck(itemId, path) {
+      var cont = document.querySelector('.dest-form[data-item="' + itemId + '"]');
+      if (!cont) return;
+      var ids = cont.getAttribute("data-check-ids") || "";
+      var box = document.getElementById("target-check-" + itemId);
+      if (!ids || !box) return;
+      box.innerHTML = '<div class="target-checking">Revisando destino…</div>';
+      fetch("/api/target-check?ids=" + encodeURIComponent(ids) + "&dest_folder=" + encodeURIComponent(path))
+        .then(function (r) { return r.json(); })
+        .then(function (data) { box.innerHTML = data.html || ""; })
+        .catch(function () { box.innerHTML = ""; });
+    }
+    function markSubmitting(form, workingText) {
+      var btn = form.querySelector('button[type="submit"]');
+      if (btn) {
+        btn.disabled = true;
+        btn.dataset.originalText = btn.textContent;
+        btn.textContent = workingText;
+      }
+      return true;
+    }
+    function confirmAndMarkSubmit(form, message, workingText) {
+      if (!confirm(message)) return false;
+      return markSubmitting(form, workingText);
+    }
+    function confirmAndMarkDedup(form, message) {
+      return confirmAndMarkSubmit(form, message, "🧹 Limpiando…");
+    }
+    function confirmAndMarkDelete(form, message) {
+      return confirmAndMarkSubmit(form, message, "🗑️ Verificando…");
     }
   </script>
 </body>

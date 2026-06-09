@@ -59,6 +59,9 @@ CREATE TABLE IF NOT EXISTS items (
     artist         TEXT,
     album          TEXT,
     track_no       TEXT,
+    media_info     TEXT,            -- resumen JSON de calidad/idioma/códecs
+    file_hash      TEXT,            -- SHA-256 para duplicados exactos
+    file_hash_size INTEGER,
     dest_folder    TEXT,            -- carpeta base elegida por el usuario
     dest_path      TEXT,
     error          TEXT,
@@ -73,9 +76,13 @@ _MIGRATIONS = {
     "artist": "TEXT",
     "album": "TEXT",
     "track_no": "TEXT",
+    "media_info": "TEXT",
+    "file_hash": "TEXT",
+    "file_hash_size": "INTEGER",
     "dest_folder": "TEXT",
     "quality": "TEXT",
     "langs": "TEXT",
+    "match_attempts": "INTEGER",
 }
 
 
@@ -163,3 +170,20 @@ def reset_processing():
     'Moviendo…' para siempre y que la página se recargue sin parar."""
     with get_conn() as conn:
         conn.execute("UPDATE items SET status='pending' WHERE status='processing'")
+
+
+def pending_counts():
+    """Devuelve {media_type: nº pendientes} para mostrar contadores en las pestañas."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT media_type, COUNT(*) AS c FROM items WHERE status='pending' "
+            "GROUP BY media_type"
+        ).fetchall()
+        return {r["media_type"]: r["c"] for r in rows}
+
+
+def reset_match_attempts():
+    """Reinicia el contador de intentos de TMDB para lo pendiente. Se llama al
+    guardar ajustes (p.ej. al poner la API key) para que se vuelva a intentar."""
+    with get_conn() as conn:
+        conn.execute("UPDATE items SET match_attempts=0 WHERE status='pending'")
