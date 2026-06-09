@@ -133,6 +133,10 @@ def reenrich_pending():
             continue
         if it["tmdb_id"]:
             continue  # ya reconocido o elegido manualmente
+        # No reconsultar TMDB para siempre: tras 3 intentos fallidos lo dejamos.
+        # (Al guardar ajustes/poner la API key se reinicia el contador.)
+        if (it["match_attempts"] or 0) >= 3:
+            continue
         query = it["chosen_title"] or it["detected_title"]
         if not query:
             continue
@@ -146,6 +150,25 @@ def reenrich_pending():
                 chosen_year=match["year"], poster_url=match["poster_url"],
                 overview=match["overview"],
             )
+        else:
+            db.update_item(it["id"], match_attempts=(it["match_attempts"] or 0) + 1)
+
+
+def reidentify(item_id, forced_type):
+    """Vuelve a deducir datos del nombre y a buscar en TMDB cuando el usuario
+    cambia el tipo de un item (p.ej. de Película a Serie). Corre en segundo plano."""
+    item = db.get_item(item_id)
+    if not item:
+        return
+    ident = identify.identify(item["original_path"])
+    ident["media_type"] = forced_type  # respetamos la elección del usuario
+    # Limpiamos la coincidencia anterior para que se vuelva a buscar bien.
+    db.update_item(item_id, tmdb_id=None, chosen_title=None, chosen_year=None,
+                   poster_url=None, overview=None, match_attempts=0)
+    try:
+        _enrich(item_id, item["original_path"], ident)
+    except Exception as e:
+        db.update_item(item_id, error=str(e))
 
 
 def refresh_pending_file_info():

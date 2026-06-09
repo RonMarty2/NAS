@@ -4,7 +4,9 @@
 
   {% if deduping %}
     <p class="processing">🧹 Verificando (SHA-256) y borrando duplicados idénticos en segundo plano…
-      <small>la página se recarga sola; los duplicados desaparecerán al terminar.</small></p>
+      <small>la página se actualizará en unos segundos.</small></p>
+    {# Recarga ÚNICA a la URL limpia (sin ?dedup): evita el bucle infinito de recarga. #}
+    <script>setTimeout(function () { window.location.href = "/tab/series"; }, 9000);</script>
   {% endif %}
 
   {% if not groups %}

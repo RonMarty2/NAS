@@ -26,6 +26,7 @@
       <a class="tab {{ 'active' if active == 'settings' else '' }}" href="/settings">Ajustes</a>
     </nav>
     <form method="post" action="/scan" class="scan-form">
+      <input type="hidden" name="from_tab" value="{{ active }}">
       <button type="submit" class="btn btn-secondary" title="Revisar la carpeta de descargas ahora">🔄 Buscar ahora</button>
     </form>
   </header>

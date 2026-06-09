@@ -80,6 +80,7 @@ _MIGRATIONS = {
     "file_hash": "TEXT",
     "file_hash_size": "INTEGER",
     "dest_folder": "TEXT",
+    "match_attempts": "INTEGER",
 }
 
 
@@ -167,3 +168,10 @@ def reset_processing():
     'Moviendo…' para siempre y que la página se recargue sin parar."""
     with get_conn() as conn:
         conn.execute("UPDATE items SET status='pending' WHERE status='processing'")
+
+
+def reset_match_attempts():
+    """Reinicia el contador de intentos de TMDB para lo pendiente. Se llama al
+    guardar ajustes (p.ej. al poner la API key) para que se vuelva a intentar."""
+    with get_conn() as conn:
+        conn.execute("UPDATE items SET match_attempts=0 WHERE status='pending'")

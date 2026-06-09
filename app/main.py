@@ -112,7 +112,7 @@ def tab(request: Request, media_type: str, dedup: int = 0):
                 target_map[ep["id"]] = targets.inspect(ep, g["default_base"])
         return templates.TemplateResponse("series.html", {
             "request": request, "tabs": TABS, "active": media_type, "page": "tabs",
-            "groups": groups, "has_processing": bool(processing) or bool(dedup),
+            "groups": groups, "has_processing": bool(processing),
             "deduping": bool(dedup),
             "file_meta": _file_meta_map(items), "duplicate_map": duplicates.analyze(items),
             "target_map": target_map,
@@ -223,6 +223,8 @@ def settings_save(
         "telegram_chat_id": telegram_chat_id,
     }.items():
         config.set(key, val.strip())
+    # Al guardar (p.ej. tras poner la API key) reintentamos identificar lo pendiente.
+    db.reset_match_attempts()
     return RedirectResponse("/settings?saved=true", status_code=303)
 
 
@@ -353,6 +355,9 @@ def delete_duplicate(item_id: int):
 @app.post("/item/{item_id}/type")
 def change_type(item_id: int, media_type: str = Form(...)):
     db.update_item(item_id, media_type=media_type)
+    # Re-identifica en segundo plano (temporada/episodio + búsqueda TMDB del nuevo tipo).
+    threading.Thread(target=watcher.reidentify, args=(item_id, media_type),
+                     daemon=True).start()
     return _redirect_to_type(media_type)
 
 
@@ -404,10 +409,15 @@ def edit_music_save(item_id: int, artist: str = Form(""), album: str = Form(""),
 # ---------------- Acciones globales ----------------
 
 @app.post("/scan")
-def manual_scan():
+def manual_scan(from_tab: str = Form("")):
     # En segundo plano: buscar metadatos puede tardar si la red está lenta,
     # así que no bloqueamos la página.
     threading.Thread(target=watcher.scan_once, daemon=True).start()
+    # Volvemos a donde estaba el usuario (no siempre a Películas).
+    if from_tab in ("movie", "series", "music"):
+        return RedirectResponse(f"/tab/{from_tab}", status_code=303)
+    if from_tab in ("history", "settings"):
+        return RedirectResponse(f"/{from_tab}", status_code=303)
     return RedirectResponse("/", status_code=303)
 
 
