@@ -305,3 +305,10 @@ Pendiente: conectar Jellyfin (URL+API key), y elegir mejoras del roadmap (§8).
   de hashes viejos y mantener la verificación segura.
 - Si algo falla, el banner ya no se queda mudo: muestra el **último error**, cuántos fallos hubo
   y cuántos grupos se omitieron por seguridad.
+
+### Sesión 6 — 2026-06-09 (huérfanos y falsos duplicados)
+- Se corrigió el caso en que la app seguía marcando como duplicado algo que ya no existía en disco.
+- La detección de duplicados ahora **ignora archivos pendientes que ya no existen** y el escaneo
+  limpia registros huérfanos antes de seguir.
+- Resultado: si borras un archivo fuera de la app, en el siguiente escaneo ya no debería seguir
+  apareciendo como duplicado.

@@ -19,6 +19,8 @@ def analyze(items):
     for item in items:
         if item["status"] != "pending":
             continue
+        if not os.path.exists(item["original_path"]):
+            continue
         key = _leaf_key(item)
         if key:
             by_leaf.setdefault(key, []).append(item)
@@ -64,6 +66,8 @@ def comparison_groups(items):
     by_leaf = {}
     for item in items:
         if item["status"] != "pending":
+            continue
+        if not os.path.exists(item["original_path"]):
             continue
         key = _leaf_key(item)
         if key:
@@ -463,7 +467,7 @@ def _current_size(item):
     try:
         return os.path.getsize(item["original_path"])
     except OSError:
-        return _get(item, "size_bytes") or 0
+        return 0
 
 
 def _stored_valid_hash(item):

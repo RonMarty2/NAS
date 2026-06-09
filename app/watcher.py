@@ -187,11 +187,27 @@ def refresh_pending_file_info():
             continue
 
 
+def cleanup_missing_pending():
+    """Elimina registros pendientes cuyo archivo ya no existe en disco.
+
+    Esto evita que la UI siga marcando como duplicado algo que ya fue borrado
+    fuera de la app o que desapareció antes del siguiente escaneo.
+    """
+    removed = 0
+    for it in db.list_items(status="pending"):
+        path = it["original_path"]
+        if path and not os.path.exists(path):
+            db.delete_item(it["id"])
+            removed += 1
+    return removed
+
+
 def scan_once():
     """Recorre la carpeta de descargas una vez. Devuelve nº de archivos vistos."""
     root = config.get("downloads_dir")
     if not root or not os.path.isdir(root):
         return 0
+    cleanup_missing_pending()
     seen = 0
     nuevos = 0
     for dirpath, _dirs, files in os.walk(root):
