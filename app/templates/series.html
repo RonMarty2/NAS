@@ -63,7 +63,7 @@
           </div>
 
           {# ---- Lista expandible de episodios (verificación) ---- #}
-          <details class="episodes">
+          <details class="episodes" id="ep-{{ g.gid }}">
             <summary>👁️ Ver y verificar los {{ g.count }} episodios</summary>
 
             {% if g.duplicate_groups %}

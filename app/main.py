@@ -113,7 +113,7 @@ def tab(request: Request, media_type: str, dedup: int = 0):
         return templates.TemplateResponse("series.html", {
             "request": request, "tabs": TABS, "active": media_type, "page": "tabs",
             "groups": groups, "has_processing": bool(processing),
-            "deduping": bool(dedup),
+            "deduping": bool(dedup), "tab_counts": db.pending_counts(),
             "file_meta": _file_meta_map(items), "duplicate_map": duplicates.analyze(items),
             "target_map": target_map,
         })
@@ -123,7 +123,7 @@ def tab(request: Request, media_type: str, dedup: int = 0):
                 for it in items}
     return templates.TemplateResponse("index.html", {
         "request": request, "tabs": TABS, "active": media_type,
-        "items": items, "page": "tabs",
+        "items": items, "page": "tabs", "tab_counts": db.pending_counts(),
         "leaves": leaves, "defaults": defaults,
         "file_meta": _file_meta_map(items), "duplicate_map": duplicates.analyze(items),
         "target_map": _target_map(items, defaults),
@@ -188,6 +188,7 @@ def history(request: Request):
     return templates.TemplateResponse("history.html", {
         "request": request, "tabs": TABS, "active": "history",
         "done": done, "skipped": skipped, "errored": errored, "page": "history",
+        "tab_counts": db.pending_counts(),
     })
 
 
@@ -196,6 +197,7 @@ def settings_page(request: Request, saved: bool = False, msg: str = ""):
     return templates.TemplateResponse("settings.html", {
         "request": request, "tabs": TABS, "active": "settings",
         "cfg": config.as_dict(), "saved": saved, "msg": msg, "page": "settings",
+        "tab_counts": db.pending_counts(),
     })
 
 

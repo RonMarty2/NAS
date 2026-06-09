@@ -20,7 +20,7 @@
     <div class="brand">📦 NAS Organizer</div>
     <nav class="tabs">
       {% for key, label in tabs %}
-        <a class="tab {{ 'active' if active == key else '' }}" href="/tab/{{ key }}">{{ label }}</a>
+        <a class="tab {{ 'active' if active == key else '' }}" href="/tab/{{ key }}">{{ label }}{% if tab_counts and tab_counts.get(key) %} <span class="tab-count">{{ tab_counts.get(key) }}</span>{% endif %}</a>
       {% endfor %}
       <a class="tab {{ 'active' if active == 'history' else '' }}" href="/history">Historial</a>
       <a class="tab {{ 'active' if active == 'settings' else '' }}" href="/settings">Ajustes</a>
@@ -59,6 +59,29 @@
     if ("serviceWorker" in navigator && window.isSecureContext) {
       navigator.serviceWorker.register("/sw.js").catch(function () {});
     }
+
+    // Conserva la posición de scroll y los episodios abiertos al auto-recargarse
+    // (cuando algo se está moviendo), para que la página no "salte".
+    (function () {
+      try {
+        var KEY = "nas-ui-" + location.pathname;
+        var saved = JSON.parse(sessionStorage.getItem(KEY) || "{}");
+        if (saved.t && (Date.now() - saved.t) < 15000) {
+          (saved.open || []).forEach(function (id) {
+            var d = document.getElementById(id); if (d) d.open = true;
+          });
+          if (saved.scroll) window.scrollTo(0, saved.scroll);
+        }
+        window.addEventListener("beforeunload", function () {
+          var open = [];
+          document.querySelectorAll("details[id]").forEach(function (d) {
+            if (d.open) open.push(d.id);
+          });
+          sessionStorage.setItem(KEY, JSON.stringify(
+            { open: open, scroll: window.scrollY, t: Date.now() }));
+        });
+      } catch (e) {}
+    })();
 
     var fmItem = null, fmPath = "";
 

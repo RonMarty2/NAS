@@ -170,6 +170,16 @@ def reset_processing():
         conn.execute("UPDATE items SET status='pending' WHERE status='processing'")
 
 
+def pending_counts():
+    """Devuelve {media_type: nº pendientes} para mostrar contadores en las pestañas."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT media_type, COUNT(*) AS c FROM items WHERE status='pending' "
+            "GROUP BY media_type"
+        ).fetchall()
+        return {r["media_type"]: r["c"] for r in rows}
+
+
 def reset_match_attempts():
     """Reinicia el contador de intentos de TMDB para lo pendiente. Se llama al
     guardar ajustes (p.ej. al poner la API key) para que se vuelva a intentar."""

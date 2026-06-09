@@ -31,6 +31,9 @@ header {
 }
 .tab:hover { background: var(--panel2); color: var(--text); }
 .tab.active { background: var(--primary); color: #fff; }
+.tab-count { background: rgba(255,255,255,.18); border-radius: 999px; padding: 0 .4rem;
+  font-size: .72rem; font-weight: 700; margin-left: .15rem; }
+.tab.active .tab-count { background: rgba(0,0,0,.22); }
 .scan-form { margin: 0; }
 
 main { max-width: 1000px; margin: 0 auto; padding: 1.2rem; }
@@ -207,10 +210,35 @@ footer { text-align: center; color: var(--muted); padding: 1.5rem; font-size: .8
 hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
 
 @media (max-width: 760px) {
+  header { padding: .55rem .7rem; gap: .5rem; }
+  .brand { font-size: 1.05rem; }
+  .tab { padding: .4rem .6rem; font-size: .9rem; }
+  .scan-form { width: 100%; }
+  .scan-form .btn { width: 100%; }
+
   main { padding: .8rem; }
+  h1 { font-size: 1.2rem; }
   .card { flex-direction: column; }
-  .poster img, .poster-placeholder { width: 88px; height: 132px; }
+  .poster img, .poster-placeholder { width: 96px; height: 144px; }
+
+  /* Botones cómodos para el dedo */
+  .btn { padding: .6rem .85rem; }
+  .actions { gap: .45rem; }
+  .actions .btn, .actions select, .type-form { flex: 1 1 auto; text-align: center; }
+  .type-form { display: flex; }
+  .type-form select { flex: 1; }
+
   .dup-alert { align-items: flex-start; flex-direction: column; }
-  .ep-table { display: block; overflow-x: auto; }
-  .ep-data { min-width: 180px; }
+  .dup-candidates { grid-template-columns: 1fr; }
+
+  /* Lista de episodios: cada fila como bloque (en vez de tabla con scroll) */
+  .ep-table, .ep-table tbody, .ep-table tr, .ep-table td { display: block; width: 100%; }
+  .ep-table thead { display: none; }
+  .ep-table tr { border-bottom: 1px solid var(--border); padding: .5rem 0; }
+  .ep-table td { border: none; padding: .12rem 0; max-width: none; }
+  .ep-orig { font-size: .78rem; max-width: none; }
+  .ep-new { white-space: normal; font-weight: 600; }
+  .ep-data { min-width: 0; }
+  .ep-actions { gap: .6rem; margin-top: .35rem; }
+  .ep-actions .btn { padding: .45rem .8rem; }
 }
