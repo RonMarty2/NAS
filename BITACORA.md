@@ -312,3 +312,13 @@ Pendiente: conectar Jellyfin (URL+API key), y elegir mejoras del roadmap (§8).
   limpia registros huérfanos antes de seguir.
 - Resultado: si borras un archivo fuera de la app, en el siguiente escaneo ya no debería seguir
   apareciendo como duplicado.
+
+### Sesión 7 — 2026-06-09 (tareas en segundo plano y continuidad)
+- Se dejó documentado que las tareas largas de la app corren en el **servidor del NAS** (hilos en
+  segundo plano), no dependen de que la pestaña siga abierta.
+- Si el usuario cierra la página en PC o celular, el movimiento, el borrado masivo o la
+  verificación de duplicados **siguen ejecutándose** mientras el contenedor siga vivo.
+- Al reabrir la app, la interfaz vuelve a leer el estado guardado en la BD y muestra el progreso o
+  el último resultado disponible.
+- Si se reinicia o detiene el contenedor, esas tareas en curso sí se interrumpen y pueden quedar
+  marcadas como pendientes para revisarlas de nuevo.
