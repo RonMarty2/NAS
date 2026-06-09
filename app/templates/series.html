@@ -6,6 +6,9 @@
     <div class="dedup-banner {{ 'running' if dedup_notice.running else 'done' }}">
       <strong>{% if dedup_notice.running %}Limpiando duplicados idénticos de esta serie en segundo plano{% else %}Limpieza terminada{% endif %}</strong>
       <span>{{ dedup_notice.message }}</span>
+      {% if dedup_notice.deleted is defined %}
+        <small>Borrados: {{ dedup_notice.deleted }}</small>
+      {% endif %}
       {% if dedup_notice.running %}
         <small>Se verifica SHA-256 y se conserva una copia legible. En un NAS pequeño puede tardar varios minutos.</small>
       {% endif %}

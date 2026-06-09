@@ -28,7 +28,6 @@ TABS = [
 ]
 
 DEDUP_STATUS_KEY = "dedup_status"
-DEDUP_NOTICE_TTL_SECONDS = 20
 DEDUP_LOCK = threading.Lock()
 
 
@@ -118,15 +117,6 @@ def _dedup_notice():
 
     running = bool(state.get("running"))
     visible = running or bool(state.get("message"))
-    finished_at = state.get("finished_at")
-
-    if not running and finished_at:
-        from datetime import datetime
-        try:
-            ended = datetime.strptime(finished_at, "%Y-%m-%d %H:%M:%S")
-            visible = (datetime.now() - ended).total_seconds() <= DEDUP_NOTICE_TTL_SECONDS
-        except Exception:
-            visible = bool(state.get("message"))
 
     state["running"] = running
     state["visible"] = visible

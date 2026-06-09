@@ -91,6 +91,9 @@
     <div class="dedup-banner {{ 'running' if dedup_notice.running else 'done' }}">
       <strong>{% if dedup_notice.running %}Limpieza global en curso{% else %}Limpieza global terminada{% endif %}</strong>
       <span>{{ dedup_notice.message }}</span>
+      {% if dedup_notice.deleted is defined %}
+        <small>Borrados: {{ dedup_notice.deleted }}</small>
+      {% endif %}
       {% if dedup_notice.running %}
         <small>La app seguirá respondiendo mientras calcula el hash de los archivos.</small>
       {% endif %}
