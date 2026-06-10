@@ -42,7 +42,7 @@
     {% for g in groups %}
       <div class="card">
         <div class="poster">
-          {% if g.poster_url %}<img src="{{ g.poster_url }}" alt="póster">
+          {% if g.poster_url %}<img src="{{ g.poster_url }}" alt="póster" loading="lazy" decoding="async">
           {% else %}<div class="poster-placeholder">Sin imagen</div>{% endif %}
         </div>
 

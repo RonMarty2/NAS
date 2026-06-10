@@ -7,6 +7,7 @@ from xml.sax.saxutils import escape
 import requests
 
 from . import config
+from .metadata import music as music_meta
 from .metadata import tmdb
 
 # Caracteres no válidos en nombres de archivo/carpeta
@@ -249,6 +250,23 @@ def write_metadata(item, dest):
                 season_assets = tmdb.season_assets(tmdb_id, season)
                 _save_image(season_assets.get("poster"), season_poster_path)
             _write_episode_metadata(item, dest)
+
+        elif media_type == "music":
+            poster = _g(item, "poster_url") or ""
+            if poster.startswith("/music-covers/"):
+                src = music_meta.cached_cover_path(os.path.basename(poster))
+                if src:
+                    album_folder = os.path.dirname(dest)
+                    ext = os.path.splitext(src)[1].lower() or ".jpg"
+                    for name in (f"folder{ext}", f"cover{ext}"):
+                        target = os.path.join(album_folder, name)
+                        if not os.path.exists(target):
+                            try:
+                                shutil.copyfile(src, target)
+                            except Exception:
+                                pass
+                            else:
+                                break
     except Exception:
         pass
 

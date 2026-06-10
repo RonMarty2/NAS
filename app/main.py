@@ -7,7 +7,7 @@ from typing import List
 from urllib.parse import quote
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -66,6 +66,22 @@ self.addEventListener('fetch', function (e) { /* passthrough: red primero */ });
 @app.get("/sw.js")
 def service_worker():
     return Response(content=_SW_JS, media_type="application/javascript")
+
+
+@app.get("/music-covers/{cover_name}")
+def music_cover(cover_name: str):
+    path = music_meta.cached_cover_path(cover_name)
+    if not path:
+        return Response(status_code=404)
+    media_type = "image/jpeg"
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".png":
+        media_type = "image/png"
+    elif ext == ".webp":
+        media_type = "image/webp"
+    elif ext == ".bmp":
+        media_type = "image/bmp"
+    return FileResponse(path, media_type=media_type)
 
 
 def _group_series(items):
@@ -912,7 +928,10 @@ def edit_music_save(item_id: int, artist: str = Form(""), album: str = Form(""),
         album=album.strip() or "Desconocido",
         detected_title=title.strip() or None,
         track_no=track_no.strip() or None,
+        poster_url=None,
+        cover_attempts=0,
     )
+    threading.Thread(target=watcher.refresh_music_cover, args=(item_id,), daemon=True).start()
     return RedirectResponse("/tab/music", status_code=303)
 
 

@@ -83,6 +83,7 @@ _MIGRATIONS = {
     "quality": "TEXT",
     "langs": "TEXT",
     "match_attempts": "INTEGER",
+    "cover_attempts": "INTEGER",
 }
 
 

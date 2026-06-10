@@ -323,6 +323,15 @@ Pendiente: conectar Jellyfin (URL+API key), y elegir mejoras del roadmap (§8).
 - Si se reinicia o detiene el contenedor, esas tareas en curso sí se interrumpen y pueden quedar
   marcadas como pendientes para revisarlas de nuevo.
 
+### Sesión 8 — 2026-06-09 (carátulas de música)
+- Se agregó soporte de **carátula para música** en la vista de pendientes.
+- La app intenta primero la portada embebida o una imagen de carpeta cercana; si no hay, prueba
+  una portada de MusicBrainz / Cover Art Archive cuando el álbum se puede identificar.
+- La portada encontrada se cachea en disco y se sirve desde la app para que no vuelva a descargarse
+  en cada refresco.
+- Al mover la música, si la portada existe, también se guarda como imagen de carpeta en el álbum
+  para que Jellyfin la detecte mejor.
+
 ### Sesión 8 — 2026-06-09 (restaurar duplicados en la rama desplegada)
 - El usuario reportó que ya no aparecían los duplicados lado a lado ni el botón para borrarlos
   de golpe. La causa fue que la copia local/GitHub seguía arrancando en

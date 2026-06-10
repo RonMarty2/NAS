@@ -1,7 +1,7 @@
 <div class="card">
   <div class="poster">
     {% if item["poster_url"] %}
-      <img src="{{ item['poster_url'] }}" alt="póster">
+      <img src="{{ item['poster_url'] }}" alt="póster" loading="lazy" decoding="async">
     {% else %}
       <div class="poster-placeholder">Sin imagen</div>
     {% endif %}

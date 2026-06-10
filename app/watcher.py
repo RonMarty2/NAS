@@ -78,6 +78,9 @@ def _enrich(item_id, path, ident):
             "detected_title": m.get("title"),   # título de la canción
             "detected_year": m.get("year"),
         })
+        if m.get("cover_url"):
+            fields["poster_url"] = m["cover_url"]
+            fields["cover_attempts"] = 0
 
     db.update_item(item_id, **fields)
 
@@ -201,6 +204,48 @@ def refresh_pending_file_info():
             continue
 
 
+def refresh_music_cover(item_id):
+    """Try to fill the cover art for a pending music item."""
+    item = db.get_item(item_id)
+    if not item or item["media_type"] != "music":
+        return False
+    if item["poster_url"]:
+        return True
+    if (item["cover_attempts"] or 0) >= 3:
+        return False
+    artist = item["artist"] if _meaningful_text(item["artist"]) else None
+    album = item["album"] if _meaningful_text(item["album"]) else None
+    title = item["detected_title"] or item["filename"]
+    try:
+        cover_url = music_meta.cover_url_for_path(
+            item["original_path"], artist=artist, album=album, title=title,
+        )
+    except Exception:
+        cover_url = None
+    if cover_url:
+        db.update_item(item_id, poster_url=cover_url, cover_attempts=0)
+        return True
+    db.update_item(item_id, cover_attempts=(item["cover_attempts"] or 0) + 1)
+    return False
+
+
+def refresh_pending_music_covers():
+    """Completa la portada de canciones/albumes pendientes cuando falta."""
+    for it in db.list_items(status="pending", media_type="music"):
+        if it["poster_url"]:
+            continue
+        if (it["cover_attempts"] or 0) >= 3:
+            continue
+        refresh_music_cover(it["id"])
+
+
+def _meaningful_text(value):
+    if value is None:
+        return False
+    text = str(value).strip().lower()
+    return bool(text) and text not in {"desconocido", "unknown", "n/a", "none", "-"}
+
+
 def cleanup_missing_pending():
     """Elimina registros pendientes cuyo archivo ya no existe en disco.
 
@@ -232,6 +277,7 @@ def scan_once():
     # Reintenta metadatos de lo que quedó pendiente sin reconocer.
     reenrich_pending()
     refresh_pending_file_info()
+    refresh_pending_music_covers()
     # Avisa si llegaron descargas nuevas para revisar.
     if nuevos:
         plural = "s" if nuevos != 1 else ""
