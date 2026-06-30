@@ -50,15 +50,24 @@
       <div><strong>{{ catalog.uncached }}</strong><span>por completar</span></div>
     </section>
 
+    <section class="album-search">
+      <label for="albumSearch">Buscar en mi álbum</label>
+      <div class="album-search-row">
+        <input id="albumSearch" type="search" placeholder="Película, serie o saga" autocomplete="off">
+        <a id="albumSearchClear" class="btn btn-secondary" href="/catalog">Limpiar</a>
+      </div>
+      <small id="albumSearchSummary"></small>
+    </section>
+
     {% if catalog.collections %}
-      <section class="album-section">
+      <section class="album-section" data-album-section>
         <div class="album-section-head">
           <h2>Sagas</h2>
           <span>{{ catalog.collections|length }} colecciones</span>
         </div>
         <div class="album-saga-grid">
           {% for saga in catalog.collections %}
-            <article class="album-saga">
+            <article class="album-saga" data-album-card>
               <div class="album-saga-cover">
                 {% if saga.poster_url %}
                   <img src="{{ saga.poster_url }}" alt="">
@@ -107,14 +116,14 @@
     {% endif %}
 
     {% if catalog.standalone %}
-      <section class="album-section">
+      <section class="album-section" data-album-section>
         <div class="album-section-head">
           <h2>Películas</h2>
           <span>{{ catalog.standalone|length }} sin saga detectada</span>
         </div>
         <div class="album-movie-grid">
           {% for movie in catalog.standalone %}
-            <article class="album-movie">
+            <article class="album-movie" data-album-card>
               <div class="album-movie-poster">
                 {% if movie.poster_url %}
                   <img src="{{ movie.poster_url }}" alt="">
@@ -131,14 +140,14 @@
     {% endif %}
 
     {% if catalog.series %}
-      <section class="album-section">
+      <section class="album-section" data-album-section>
         <div class="album-section-head">
           <h2>Series</h2>
           <span>{{ catalog.series|length }} importadas</span>
         </div>
         <div class="album-movie-grid">
           {% for show in catalog.series %}
-            <article class="album-movie">
+            <article class="album-movie" data-album-card>
               <div class="album-movie-poster">
                 {% if show.poster_url %}
                   <img src="{{ show.poster_url }}" alt="">
@@ -178,5 +187,69 @@
         <p>Pulsa <strong>Traer lo que ya tengo</strong> para cargar las películas que ya están en el NAS.</p>
       </section>
     {% endif %}
+
+    <section id="albumSearchEmpty" class="album-empty album-empty-search" hidden>
+      <h2>No aparece en tu álbum</h2>
+      <p>Prueba con otro nombre o revisa si falta importar esa carpeta.</p>
+    </section>
   </div>
+
+  <script>
+    (function () {
+      var input = document.getElementById("albumSearch");
+      if (!input) return;
+      var cards = Array.prototype.slice.call(document.querySelectorAll("[data-album-card]"));
+      var sections = Array.prototype.slice.call(document.querySelectorAll("[data-album-section]"));
+      var empty = document.getElementById("albumSearchEmpty");
+      var summary = document.getElementById("albumSearchSummary");
+      var clear = document.getElementById("albumSearchClear");
+      var params = new URLSearchParams(window.location.search);
+
+      function normalize(text) {
+        return (text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      }
+
+      cards.forEach(function (card, index) {
+        card.dataset.searchText = normalize(card.textContent);
+        card.style.setProperty("--album-order", Math.min(index, 18));
+      });
+
+      function applySearch(push) {
+        var raw = input.value.trim();
+        var q = normalize(raw);
+        var visible = 0;
+        cards.forEach(function (card) {
+          var match = !q || card.dataset.searchText.indexOf(q) !== -1;
+          card.hidden = !match;
+          if (match) {
+            visible += 1;
+            if (q) {
+              card.classList.remove("album-pop");
+              void card.offsetWidth;
+              card.classList.add("album-pop");
+            } else {
+              card.classList.remove("album-pop");
+            }
+          }
+        });
+        sections.forEach(function (section) {
+          var hasVisible = section.querySelector("[data-album-card]:not([hidden])");
+          section.hidden = !hasVisible;
+        });
+        if (empty) empty.hidden = !q || visible > 0;
+        if (summary) {
+          summary.textContent = q ? (visible + " resultado(s)") : "";
+        }
+        if (clear) clear.hidden = !q;
+        if (push) {
+          var url = q ? ("/catalog?q=" + encodeURIComponent(raw)) : "/catalog";
+          history.replaceState(null, "", url);
+        }
+      }
+
+      input.value = params.get("q") || "";
+      input.addEventListener("input", function () { applySearch(true); });
+      applySearch(false);
+    })();
+  </script>
 {% endblock %}
