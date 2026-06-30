@@ -151,6 +151,12 @@ h1 { font-size: 1.4rem; }
 }
 .target-warning strong { display: block; color: var(--warn); margin-bottom: .1rem; }
 .target-warning span, .target-checking { color: var(--muted); }
+.target-info {
+  padding: .48rem .6rem; border: 1px solid rgba(0,164,220,.75);
+  border-radius: 8px; background: rgba(0,164,220,.08); font-size: .8rem;
+}
+.target-info strong { display: block; color: var(--primary); margin-bottom: .1rem; }
+.target-info span { color: var(--muted); }
 .target-warning-strong { border-color: rgba(229,83,75,.8); background: rgba(229,83,75,.08); }
 .target-warning-strong strong { color: var(--danger); }
 .conflict-warning { margin: 1rem 0 0; }

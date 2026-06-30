@@ -707,10 +707,10 @@ def _target_check_html(summary):
                 + '</span></div>'
             )
         return (
-            '<div class="target-warning target-warning-strong">'
-            '<strong>Ya existe en destino</strong>'
+            '<div class="target-info">'
+            '<strong>Ya hay copia igual en biblioteca</strong>'
             f'<span>{summary["exact_count"]} archivo{plural} final{plural} ya existe{"" if summary["exact_count"] == 1 else "n"}. '
-            'Al confirmar, podras comparar y elegir que conservar.'
+            'Puedes comparar o borrar solo la copia pendiente de descargas.'
             + (f' Ejemplo: {examples}.' if examples else '')
             + '</span></div>'
         )

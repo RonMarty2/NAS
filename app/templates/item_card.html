@@ -94,8 +94,8 @@
       <a class="btn btn-secondary" href="/item/{{ item['id'] }}/conflict">Comparar versiones</a>
         {% if target.safe_to_delete_pending %}
           <form method="post" action="/item/{{ item['id'] }}/delete"
-                onsubmit="return confirm('Este archivo final ya existe en destino y pesa igual. Se borrara solo el pendiente de descargas. Continuar?');">
-            <button class="btn btn-danger" type="submit">Borrar pendiente</button>
+                onsubmit="return confirm('Se borrara SOLO la copia pendiente de descargas. La pelicula que ya esta en la biblioteca no se toca. Continuar?');">
+            <button class="btn btn-danger" type="submit">Borrar copia pendiente</button>
           </form>
         {% endif %}
       {% else %}

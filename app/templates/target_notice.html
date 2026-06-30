@@ -7,9 +7,9 @@
           <span>El archivo final existe, pero no se pudo confirmar que sea igual. Pendiente: {{ target.source_size_bytes|filesizeformat }}. Destino: {{ target.dest_size_bytes|filesizeformat }}. No borres el pendiente sin comparar.</span>
         </div>
       {% else %}
-        <div class="target-warning target-warning-strong">
-          <strong>Ya existe en destino</strong>
-          <span>Ese archivo final ya esta en la biblioteca y pesa igual. Al confirmar, podras comparar y elegir que conservar.</span>
+        <div class="target-info">
+          <strong>Ya hay una copia igual en biblioteca</strong>
+          <span>El archivo final existe y pesa igual. Puedes comparar o borrar solo la copia pendiente de descargas.</span>
         </div>
       {% endif %}
     {% elif target.has_media_in_folder %}

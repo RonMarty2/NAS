@@ -68,8 +68,8 @@
               <span id="prev-{{ g.gid }}">{{ g.default_base }}/{{ g.title }}/Season …</span></p>
             <div class="target-notice target-check" id="target-check-{{ g.gid }}">
               {% if g.target.exact_count %}
-                <div class="target-warning target-warning-strong">
-                  <strong>Ya existe en destino</strong>
+                <div class="{{ 'target-warning target-warning-strong' if g.target_unsafe_exact_count else 'target-info' }}">
+                  <strong>{% if g.target_unsafe_exact_count %}Destino sospechoso{% else %}Ya hay copias iguales en biblioteca{% endif %}</strong>
                   <span>{{ g.target.exact_count }} episodio{{ 's' if g.target.exact_count != 1 else '' }} ya tiene{{ 'n' if g.target.exact_count != 1 else '' }} archivo final en la biblioteca. Se moveran solo los que no tengan conflicto; compara los otros uno por uno.{% if g.target_unsafe_exact_count %} {{ g.target_unsafe_exact_count }} destino{{ 's' if g.target_unsafe_exact_count != 1 else '' }} pesa{{ 'n' if g.target_unsafe_exact_count != 1 else '' }} distinto y no se puede borrar en lote.{% endif %}</span>
                 </div>
                 {% if g.target_exact_pending_ids %}
@@ -204,8 +204,8 @@
                         <a class="btn btn-secondary btn-sm" href="/item/{{ ep['id'] }}/conflict">Comparar</a>
                         {% if target.safe_to_delete_pending %}
                           <form method="post" action="/item/{{ ep['id'] }}/delete"
-                                onsubmit="return confirm('Este archivo final ya existe en destino y pesa igual. Se borrara solo el pendiente de descargas. Continuar?');">
-                            <button class="btn btn-danger btn-sm" title="Borrar pendiente de descargas">Borrar pendiente</button></form>
+                                onsubmit="return confirm('Se borrara SOLO la copia pendiente de descargas. El episodio que ya esta en la biblioteca no se toca. Continuar?');">
+                            <button class="btn btn-danger btn-sm" title="Borrar copia pendiente de descargas">Borrar copia pendiente</button></form>
                         {% endif %}
                       {% else %}
                         <form method="post" action="/item/{{ ep['id'] }}/delete"
