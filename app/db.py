@@ -177,6 +177,14 @@ def reset_processing():
         conn.execute("UPDATE items SET status='pending' WHERE status='processing'")
 
 
+def count_processing():
+    """Nº de items moviéndose ahora mismo (para saber si seguir sondeando)."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) AS c FROM items WHERE status='processing'"
+        ).fetchone()["c"]
+
+
 def pending_counts():
     """Devuelve {media_type: nº pendientes} para mostrar contadores en las pestañas."""
     with get_conn() as conn:

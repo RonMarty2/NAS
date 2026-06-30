@@ -232,7 +232,41 @@ def _base_context():
         "scan_running": bool(scan_notice.get("running")),
         "local_metadata_notice": local_metadata_notice,
         "local_metadata_running": bool(local_metadata_notice.get("running")),
+        "activity": _activity(scan_notice, local_metadata_notice),
     }
+
+
+def _activity(scan_notice=None, local_metadata_notice=None):
+    """Resumen barato del estado para que la página sondee en vez de recargarse
+    entera cada pocos segundos. `active` indica si hay algo en curso (y por tanto
+    conviene seguir mirando); `sig` cambia solo cuando algo relevante cambió, de
+    modo que el navegador recarga una vez (al terminar) y no en cada tick."""
+    scan_notice = scan_notice if scan_notice is not None else _scan_notice()
+    local_notice = local_metadata_notice if local_metadata_notice is not None else _local_metadata_notice()
+    dedup = _dedup_notice()
+    delete_dup = _delete_dup_notice()
+    processing = db.count_processing()
+    counts = db.pending_counts()
+
+    active = bool(
+        processing
+        or dedup.get("running") or delete_dup.get("running")
+        or scan_notice.get("running") or local_notice.get("running")
+    )
+    sig = "|".join(str(x) for x in [
+        processing, sum(counts.values()),
+        dedup.get("running"), dedup.get("done"), dedup.get("deleted"), dedup.get("errors"),
+        delete_dup.get("running"), delete_dup.get("message"),
+        scan_notice.get("running"), scan_notice.get("message"),
+        local_notice.get("running"), local_notice.get("done"), local_notice.get("errors"),
+    ])
+    return {"active": active, "sig": sig}
+
+
+@app.get("/api/status")
+def api_status():
+    """Estado ligero para el sondeo del front (no renderiza HTML pesado)."""
+    return _activity()
 
 
 def _start_scan_job():
