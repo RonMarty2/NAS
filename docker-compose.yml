@@ -14,7 +14,7 @@ services:
       # --- Valores iniciales (luego se pueden editar desde la pestaña Ajustes) ---
       # Usamos las MISMAS rutas que en el NAS (gracias a montar /volume1 entero).
       # Así los movimientos son INSTANTÁNEOS (no copia) y las rutas se ven igual.
-      - NAS_DOWNLOADS_DIR=/volume1/homes/rnd261190/jdownloader
+      - NAS_DOWNLOADS_DIR=/volume1/descargas
       # Raíces que verás en el navegador de carpetas al elegir destino.
       - NAS_LIBRARY_ROOTS=/volume1/video,/volume1/music
       # Carpetas preseleccionadas por defecto (puedes elegir otra en cada descarga).
