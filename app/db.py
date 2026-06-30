@@ -25,12 +25,22 @@ def get_conn():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA busy_timeout=15000")
     try:
         yield conn
         conn.commit()
     finally:
         conn.close()
+
+
+@contextmanager
+def write_conn():
+    """Conexión para ESCRIBIR. Serializa todas las escrituras con un lock del
+    proceso para que confirmar varios movimientos a la vez no provoque choques
+    'database is locked' (que antes tumbaban la petición con un error 500)."""
+    with _lock:
+        with get_conn() as conn:
+            yield conn
 
 
 SCHEMA = """
@@ -110,7 +120,7 @@ def get_setting(key, default=None):
 
 
 def set_setting(key, value):
-    with get_conn() as conn:
+    with write_conn() as conn:
         conn.execute(
             "INSERT INTO settings(key, value) VALUES(?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -128,7 +138,7 @@ def all_settings():
 
 def add_item(original_path, filename, size_bytes=0):
     """Inserta un archivo nuevo si no existe. Devuelve el id o None si ya existía."""
-    with _lock, get_conn() as conn:
+    with write_conn() as conn:
         cur = conn.execute(
             "INSERT OR IGNORE INTO items(original_path, filename, size_bytes) VALUES(?,?,?)",
             (original_path, filename, size_bytes),
@@ -146,7 +156,7 @@ def update_item(item_id, **fields):
         return
     cols = ", ".join(f"{k}=?" for k in fields)
     vals = list(fields.values()) + [item_id]
-    with get_conn() as conn:
+    with write_conn() as conn:
         conn.execute(f"UPDATE items SET {cols} WHERE id=?", vals)
 
 
@@ -165,7 +175,7 @@ def list_items(status=None, media_type=None):
 
 
 def delete_item(item_id):
-    with get_conn() as conn:
+    with write_conn() as conn:
         conn.execute("DELETE FROM items WHERE id=?", (item_id,))
 
 
@@ -173,7 +183,7 @@ def reset_processing():
     """Devuelve a 'pending' los items que quedaron 'processing' (p.ej. si el
     contenedor se reinició a mitad de un movimiento). Evita que se queden
     'Moviendo…' para siempre y que la página se recargue sin parar."""
-    with get_conn() as conn:
+    with write_conn() as conn:
         conn.execute("UPDATE items SET status='pending' WHERE status='processing'")
 
 
@@ -198,5 +208,5 @@ def pending_counts():
 def reset_match_attempts():
     """Reinicia el contador de intentos de TMDB para lo pendiente. Se llama al
     guardar ajustes (p.ej. al poner la API key) para que se vuelva a intentar."""
-    with get_conn() as conn:
+    with write_conn() as conn:
         conn.execute("UPDATE items SET match_attempts=0 WHERE status='pending'")
