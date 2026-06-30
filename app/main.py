@@ -2,7 +2,9 @@
 import json
 import html
 import os
+import queue
 import threading
+import time
 from typing import List
 from urllib.parse import quote
 
@@ -35,25 +37,81 @@ SCAN_STATUS_KEY = "scan_status"
 SCAN_LOCK = threading.Lock()
 LOCAL_METADATA_STATUS_KEY = "local_metadata_status"
 LOCAL_METADATA_LOCK = threading.Lock()
+IO_LOCK = threading.Lock()
+MOVE_QUEUE = queue.Queue()
+MOVE_LOCK = threading.Lock()
+MOVE_QUEUED = set()
+MOVE_WORKER_STARTED = False
+JELLYFIN_REFRESH_DELAY_SECONDS = int(os.environ.get("NAS_JELLYFIN_REFRESH_DELAY_SECONDS", "45"))
+JELLYFIN_REFRESH_LOCK = threading.Lock()
+JELLYFIN_REFRESH_TIMER = None
+RECONCILE_LOCK = threading.Lock()
+RECONCILE_LAST = 0.0
+RECONCILE_INTERVAL_SECONDS = int(os.environ.get("NAS_RECONCILE_INTERVAL_SECONDS", "20"))
 
 
 @app.on_event("startup")
 def _startup():
     db.init_db()
-    try:
-        organizer.cleanup_temp_copies(delete_all=True)
-    except Exception:
-        pass
     db.reset_processing()  # recupera movimientos que quedaron a medias
     try:
         watcher.reconcile_pending_moves()
+    except Exception:
+        pass
+    try:
+        organizer.cleanup_temp_copies(
+            roots=_temp_cleanup_dirs_from_db(),
+            delete_all=True,
+            recursive=False,
+        )
     except Exception:
         pass
     _set_dedup_state({})
     _set_delete_dup_state({})
     _recover_scan_state()
     _recover_local_metadata_state()
+    _start_move_worker()
     watcher.start_background()
+
+
+def _temp_cleanup_dirs_from_db():
+    """Carpetas concretas donde pudo quedar un temporal de copia.
+
+    Evita caminar toda la biblioteca en cada arranque del NAS.
+    """
+    dirs = set()
+    for status in ("pending", "processing", "error", "done"):
+        for item in db.list_items(status=status):
+            for path in (item["dest_path"], _expected_dest_for_item(item)):
+                if path:
+                    dirs.add(os.path.dirname(path))
+    return sorted(dirs)
+
+
+def _expected_dest_for_item(item):
+    try:
+        return organizer.build_dest(item)
+    except Exception:
+        return None
+
+
+def _maybe_reconcile_pending_moves():
+    global RECONCILE_LAST
+    now = time.time()
+    if now - RECONCILE_LAST < RECONCILE_INTERVAL_SECONDS:
+        return
+    if not RECONCILE_LOCK.acquire(blocking=False):
+        return
+    try:
+        now = time.time()
+        if now - RECONCILE_LAST < RECONCILE_INTERVAL_SECONDS:
+            return
+        watcher.reconcile_pending_moves()
+        RECONCILE_LAST = now
+    except Exception:
+        RECONCILE_LAST = now
+    finally:
+        RECONCILE_LOCK.release()
 
 
 # ---------------- Vistas principales ----------------
@@ -370,25 +428,36 @@ def _start_local_metadata_job():
     def worker():
         done = 0
         errors = 0
-        for item in items:
-            current = item["dest_path"] or item["filename"]
-            try:
-                if item["dest_path"] and os.path.exists(item["dest_path"]):
-                    organizer.write_metadata(item, item["dest_path"])
-                else:
+        _set_local_metadata_state({
+            "running": True,
+            "started_at": started_at,
+            "message": "Esperando turno: el NAS solo hara una tarea pesada a la vez.",
+            "done": done,
+            "total": len(items),
+            "errors": errors,
+            "current": "",
+        })
+        _wait_for_move_queue_to_clear()
+        with IO_LOCK:
+            for item in items:
+                current = item["dest_path"] or item["filename"]
+                try:
+                    if item["dest_path"] and os.path.exists(item["dest_path"]):
+                        organizer.write_metadata(item, item["dest_path"])
+                    else:
+                        errors += 1
+                except Exception:
                     errors += 1
-            except Exception:
-                errors += 1
-            done += 1
-            _set_local_metadata_state({
-                "running": True,
-                "started_at": started_at,
-                "message": "Generando metadata local...",
-                "done": done,
-                "total": len(items),
-                "errors": errors,
-                "current": current,
-            })
+                done += 1
+                _set_local_metadata_state({
+                    "running": True,
+                    "started_at": started_at,
+                    "message": "Generando metadata local...",
+                    "done": done,
+                    "total": len(items),
+                    "errors": errors,
+                    "current": current,
+                })
 
         _set_local_metadata_state({
             "running": False,
@@ -442,7 +511,14 @@ def _start_dedup_job(item_ids, scope):
             _set_dedup_state(dict(state))
 
         try:
-            result = duplicates.delete_all_exact_duplicates(item_ids, progress=push)
+            state.update({
+                "message": "Esperando turno: el NAS solo hara una tarea pesada a la vez.",
+                "phase": "waiting",
+            })
+            _set_dedup_state(dict(state))
+            _wait_for_move_queue_to_clear()
+            with IO_LOCK:
+                result = duplicates.delete_all_exact_duplicates(item_ids, progress=push)
             state.update({
                 "running": False,
                 "scope": scope,
@@ -497,7 +573,15 @@ def _start_delete_dup_job(item_id):
 
     def worker():
         try:
-            ok, message = duplicates.delete_exact_duplicate(item_id)
+            _set_delete_dup_state({
+                "running": True,
+                "item_id": item_id,
+                "started_at": started_at,
+                "message": "Esperando turno: el NAS solo hara una tarea pesada a la vez.",
+            })
+            _wait_for_move_queue_to_clear()
+            with IO_LOCK:
+                ok, message = duplicates.delete_exact_duplicate(item_id)
             item = db.get_item(item_id)
             if not ok and item:
                 db.update_item(item_id, error=message)
@@ -528,10 +612,7 @@ def _start_delete_dup_job(item_id):
 
 @app.get("/tab/{media_type}", response_class=HTMLResponse)
 def tab(request: Request, media_type: str, dedup: int = 0):
-    try:
-        watcher.reconcile_pending_moves()
-    except Exception:
-        pass
+    _maybe_reconcile_pending_moves()
     # Mostramos lo pendiente y lo que se está moviendo (para ver el progreso).
     processing = db.list_items(status="processing", media_type=media_type)
     pending = db.list_items(status="pending", media_type=media_type)
@@ -547,11 +628,15 @@ def tab(request: Request, media_type: str, dedup: int = 0):
             g["target"] = targets.inspect_many(g["episodes"], g["default_base"])
             g["duplicate_groups"] = duplicates.comparison_groups(g["episodes"])
             g["target_exact_pending_ids"] = []
+            g["target_unsafe_exact_count"] = 0
             for ep in g["episodes"]:
                 target = targets.inspect(ep, g["default_base"])
                 target_map[ep["id"]] = target
                 if ep["status"] == "pending" and target["exact_exists"]:
-                    g["target_exact_pending_ids"].append(ep["id"])
+                    if target["safe_to_delete_pending"]:
+                        g["target_exact_pending_ids"].append(ep["id"])
+                    else:
+                        g["target_unsafe_exact_count"] += 1
         return templates.TemplateResponse("series.html", {
             "request": request, "tabs": TABS, "active": media_type, "page": "tabs",
             "groups": groups, "has_processing": bool(processing),
@@ -611,6 +696,16 @@ def _target_check_html(summary):
     examples = html.escape(", ".join(summary["examples"]))
     if summary["exact_count"]:
         plural = "s" if summary["exact_count"] != 1 else ""
+        if summary.get("unsafe_exact_count"):
+            unsafe_plural = "s" if summary["unsafe_exact_count"] != 1 else ""
+            return (
+                '<div class="target-warning target-warning-strong">'
+                '<strong>Destino sospechoso</strong>'
+                f'<span>{summary["unsafe_exact_count"]} archivo{unsafe_plural} final{unsafe_plural} existe{"" if summary["unsafe_exact_count"] == 1 else "n"}, '
+                'pero no se pudo confirmar que sea igual al pendiente. No borres el pendiente hasta comparar.'
+                + (f' Ejemplo: {examples}.' if examples else '')
+                + '</span></div>'
+            )
         return (
             '<div class="target-warning target-warning-strong">'
             '<strong>Ya existe en destino</strong>'
@@ -724,6 +819,44 @@ def _target_detail(item):
     return targets.inspect(item, base)
 
 
+def _target_delete_safety(item, target=None):
+    """Solo permite borrar el pendiente si el destino existe y pesa igual."""
+    if not item:
+        return False, "No encontre el item pendiente."
+    target = target or _target_detail(item)
+    if not target["exact_exists"]:
+        return True, ""
+    if target["safe_to_delete_pending"]:
+        return True, ""
+    if target["size_known"]:
+        return False, (
+            "No borre el pendiente: el archivo del destino no pesa igual. "
+            f"Pendiente: {_format_bytes(target['source_size_bytes'])}. "
+            f"Destino: {_format_bytes(target['dest_size_bytes'])}. "
+            "Compara versiones y reemplaza o conserva ambos."
+        )
+    return False, (
+        "No borre el pendiente: no pude comprobar que el archivo del destino "
+        "tenga el mismo peso. Compara versiones antes de borrar."
+    )
+
+
+def _format_bytes(value):
+    try:
+        n = float(value or 0)
+    except (TypeError, ValueError):
+        n = 0.0
+    units = ["B", "KB", "MB", "GB", "TB"]
+    unit = units[0]
+    for unit in units:
+        if n < 1024 or unit == units[-1]:
+            break
+        n /= 1024
+    if unit in ("B", "KB"):
+        return f"{int(n)} {unit}"
+    return f"{n:.1f} {unit}"
+
+
 def _allow_probe():
     return str(config.get("probe_media_info")).strip().lower() in ("1", "true", "yes", "on")
 
@@ -759,6 +892,70 @@ def _file_summary(path, filename=None, size_bytes=0, media_info=""):
     }
 
 
+def _start_move_worker():
+    global MOVE_WORKER_STARTED
+    with MOVE_LOCK:
+        if MOVE_WORKER_STARTED:
+            return
+        t = threading.Thread(target=_move_worker_loop, name="nas-move-worker", daemon=True)
+        t.start()
+        MOVE_WORKER_STARTED = True
+
+
+def _queue_move(item_id, on_existing="error"):
+    _start_move_worker()
+    with MOVE_LOCK:
+        if item_id in MOVE_QUEUED:
+            return False
+        MOVE_QUEUED.add(item_id)
+    MOVE_QUEUE.put((item_id, on_existing))
+    return True
+
+
+def _move_worker_loop():
+    while True:
+        item_id, on_existing = MOVE_QUEUE.get()
+        try:
+            with MOVE_LOCK:
+                MOVE_QUEUED.discard(item_id)
+            _do_move(item_id, on_existing)
+        finally:
+            MOVE_QUEUE.task_done()
+
+
+def _wait_for_move_queue_to_clear():
+    while True:
+        with MOVE_LOCK:
+            has_queued_moves = bool(MOVE_QUEUED) or not MOVE_QUEUE.empty()
+        if not has_queued_moves:
+            return
+        time.sleep(2)
+
+
+def _schedule_jellyfin_refresh():
+    global JELLYFIN_REFRESH_TIMER
+    if not jellyfin.configured():
+        return
+    with JELLYFIN_REFRESH_LOCK:
+        if JELLYFIN_REFRESH_TIMER:
+            JELLYFIN_REFRESH_TIMER.cancel()
+        JELLYFIN_REFRESH_TIMER = threading.Timer(
+            JELLYFIN_REFRESH_DELAY_SECONDS,
+            _run_jellyfin_refresh,
+        )
+        JELLYFIN_REFRESH_TIMER.daemon = True
+        JELLYFIN_REFRESH_TIMER.start()
+
+
+def _run_jellyfin_refresh():
+    global JELLYFIN_REFRESH_TIMER
+    try:
+        jellyfin.refresh_incremental()
+    finally:
+        with JELLYFIN_REFRESH_LOCK:
+            JELLYFIN_REFRESH_TIMER = None
+
+
 def _start_move(item_id, on_existing="error"):
     item = db.get_item(item_id)
     if not item:
@@ -766,7 +963,7 @@ def _start_move(item_id, on_existing="error"):
     if item["status"] == "processing":
         return _redirect_to_type(item["media_type"])
     db.update_item(item_id, status="processing", error=None)
-    threading.Thread(target=_do_move, args=(item_id, on_existing), daemon=True).start()
+    _queue_move(item_id, on_existing)
     return _redirect_to_type(item["media_type"])
 
 
@@ -774,10 +971,11 @@ def _delete_item_file_and_record(item):
     if item and os.path.exists(item["original_path"]):
         try:
             os.remove(item["original_path"])
-        except OSError:
-            pass
+        except OSError as exc:
+            return False, f"No pude borrar el pendiente: {exc}"
     if item:
         db.delete_item(item["id"])
+    return True, ""
 
 
 def _do_move(item_id, on_existing="error"):
@@ -786,11 +984,14 @@ def _do_move(item_id, on_existing="error"):
     item = db.get_item(item_id)
     if not item:
         return
-    ok, dest, message = organizer.move_item(item, on_existing=on_existing)
+    if item["status"] != "processing":
+        return
+    with IO_LOCK:
+        ok, dest, message = organizer.move_item(item, on_existing=on_existing)
     if ok:
         db.update_item(item_id, status="done", dest_path=dest,
                        processed_at=_now(), error=None)
-        jellyfin.refresh_incremental()  # escaneo incremental (solo nuevos)
+        _schedule_jellyfin_refresh()
     elif message and message.startswith("Ya existe en destino"):
         db.update_item(item_id, status="pending", error=message)
     else:
@@ -835,7 +1036,7 @@ def confirm_series(ids: List[int] = Form(...), dest_folder: str = Form(""),
             db.update_item(item_id, dest_folder=target, status="pending", error=CONFLICT_NOTICE)
             continue
         db.update_item(item_id, dest_folder=target, status="processing", error=None)
-        threading.Thread(target=_do_move, args=(item_id,), daemon=True).start()
+        _queue_move(item_id)
     return _redirect_to_type("series")
 
 
@@ -875,10 +1076,16 @@ def conflict_form(request: Request, item_id: int):
 def conflict_keep_existing(item_id: int):
     item = db.get_item(item_id)
     mt = item["media_type"] if item else "movie"
-    if item and _target_detail(item)["exact_exists"]:
-        _delete_item_file_and_record(item)
-    elif item:
-        db.update_item(item_id, error="Ya no existe un archivo en destino para comparar.")
+    if item:
+        target = _target_detail(item)
+        if target["exact_exists"]:
+            ok, message = _target_delete_safety(item, target)
+            if ok:
+                ok, message = _delete_item_file_and_record(item)
+            if not ok:
+                db.update_item(item_id, error=message)
+        else:
+            db.update_item(item_id, error="Ya no existe un archivo en destino para comparar.")
     return _redirect_to_type(mt)
 
 
@@ -900,8 +1107,13 @@ def delete_existing_series(ids: List[int] = Form(...), dest_folder: str = Form("
         item = db.get_item(item_id)
         if not item or item["status"] != "pending":
             continue
-        if _destination_exists(item, base):
-            _delete_item_file_and_record(item)
+        target = targets.inspect(item, base)
+        if target["exact_exists"]:
+            ok, message = _target_delete_safety(item, target)
+            if ok:
+                ok, message = _delete_item_file_and_record(item)
+            if not ok:
+                db.update_item(item_id, error=message)
     return _redirect_to_type("series")
 
 
@@ -947,7 +1159,16 @@ def delete(item_id: int):
     """Borra el archivo del disco y el registro."""
     item = db.get_item(item_id)
     mt = item["media_type"] if item else "movie"
-    _delete_item_file_and_record(item)
+    if item:
+        target = _target_detail(item)
+        if target["exact_exists"]:
+            ok, message = _target_delete_safety(item, target)
+            if not ok:
+                db.update_item(item_id, error=message)
+                return _redirect_to_type(mt)
+        ok, message = _delete_item_file_and_record(item)
+        if not ok:
+            db.update_item(item_id, error=message)
     return _redirect_to_type(mt)
 
 

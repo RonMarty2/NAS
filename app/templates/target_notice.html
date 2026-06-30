@@ -1,10 +1,17 @@
 {% if target %}
   <div class="target-notice target-check" id="target-check-{{ check_id }}">
     {% if target.exact_exists %}
-      <div class="target-warning target-warning-strong">
-        <strong>Ya existe en destino</strong>
-        <span>Ese archivo final ya esta en la biblioteca. Al confirmar, podras comparar y elegir que conservar.</span>
-      </div>
+      {% if not target.safe_to_delete_pending %}
+        <div class="target-warning target-warning-strong">
+          <strong>Destino sospechoso</strong>
+          <span>El archivo final existe, pero no se pudo confirmar que sea igual. Pendiente: {{ target.source_size_bytes|filesizeformat }}. Destino: {{ target.dest_size_bytes|filesizeformat }}. No borres el pendiente sin comparar.</span>
+        </div>
+      {% else %}
+        <div class="target-warning target-warning-strong">
+          <strong>Ya existe en destino</strong>
+          <span>Ese archivo final ya esta en la biblioteca y pesa igual. Al confirmar, podras comparar y elegir que conservar.</span>
+        </div>
+      {% endif %}
     {% elif target.has_media_in_folder %}
       <div class="target-warning">
         <strong>Ya hay contenido en esa carpeta</strong>

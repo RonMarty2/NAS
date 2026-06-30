@@ -52,7 +52,7 @@
           {% if g.overview %}<p class="overview">{{ g.overview[:200] }}</p>{% endif %}
 
           {% if g.processing %}
-            <p class="processing">⏳ Moviendo episodios… <small>(la página se actualiza sola)</small></p>
+            <p class="processing">⏳ En cola / moviendo episodios… <small>(el NAS procesa un archivo a la vez; la página se actualiza sola)</small></p>
           {% endif %}
 
           {# ---- Carpeta destino para toda la serie ---- #}
@@ -70,14 +70,14 @@
               {% if g.target.exact_count %}
                 <div class="target-warning target-warning-strong">
                   <strong>Ya existe en destino</strong>
-                  <span>{{ g.target.exact_count }} episodio{{ 's' if g.target.exact_count != 1 else '' }} ya tiene{{ 'n' if g.target.exact_count != 1 else '' }} archivo final en la biblioteca. Se moveran solo los que no tengan conflicto; compara los otros uno por uno.</span>
+                  <span>{{ g.target.exact_count }} episodio{{ 's' if g.target.exact_count != 1 else '' }} ya tiene{{ 'n' if g.target.exact_count != 1 else '' }} archivo final en la biblioteca. Se moveran solo los que no tengan conflicto; compara los otros uno por uno.{% if g.target_unsafe_exact_count %} {{ g.target_unsafe_exact_count }} destino{{ 's' if g.target_unsafe_exact_count != 1 else '' }} pesa{{ 'n' if g.target_unsafe_exact_count != 1 else '' }} distinto y no se puede borrar en lote.{% endif %}</span>
                 </div>
                 {% if g.target_exact_pending_ids %}
                   <form method="post" action="/series/delete-existing"
                         onsubmit="return confirm('Se borraran de descargas solo los pendientes cuyo archivo final ya existe en Jellyfin. No toca la biblioteca. Continuar?');">
                     {% for ep_id in g.target_exact_pending_ids %}<input type="hidden" name="ids" value="{{ ep_id }}">{% endfor %}
                     <input type="hidden" name="dest_folder" value="{{ g.default_base }}">
-                    <button class="btn btn-danger btn-sm" type="submit">Borrar los {{ g.target_exact_pending_ids|length }} pendientes que ya existen</button>
+                    <button class="btn btn-danger btn-sm" type="submit">Borrar los {{ g.target_exact_pending_ids|length }} pendientes seguros</button>
                   </form>
                 {% endif %}
               {% elif g.target.folder_count %}
@@ -177,7 +177,11 @@
                       <div class="ep-dup ep-dup-possible">Posible duplicado</div>
                     {% endif %}
                     {% if target.exact_exists %}
-                      <div class="ep-dup ep-target-exists">Ya existe en destino</div>
+                      {% if target.exact_size_mismatch %}
+                        <div class="ep-dup ep-target-exists">Destino pesa distinto</div>
+                      {% else %}
+                        <div class="ep-dup ep-target-exists">Ya existe en destino</div>
+                      {% endif %}
                     {% endif %}
                   </td>
                   <td class="ep-new">
@@ -198,9 +202,11 @@
                           <button class="btn btn-danger btn-sm" title="Verificar y borrar duplicado exacto" {% if delete_dup_notice.running %}disabled{% endif %}>🗑️</button></form>
                       {% elif target.exact_exists %}
                         <a class="btn btn-secondary btn-sm" href="/item/{{ ep['id'] }}/conflict">Comparar</a>
-                        <form method="post" action="/item/{{ ep['id'] }}/delete"
-                              onsubmit="return confirm('Este archivo final ya existe en destino. Se borrara solo el pendiente de descargas. Continuar?');">
-                          <button class="btn btn-danger btn-sm" title="Borrar pendiente de descargas">Borrar pendiente</button></form>
+                        {% if target.safe_to_delete_pending %}
+                          <form method="post" action="/item/{{ ep['id'] }}/delete"
+                                onsubmit="return confirm('Este archivo final ya existe en destino y pesa igual. Se borrara solo el pendiente de descargas. Continuar?');">
+                            <button class="btn btn-danger btn-sm" title="Borrar pendiente de descargas">Borrar pendiente</button></form>
+                        {% endif %}
                       {% else %}
                         <form method="post" action="/item/{{ ep['id'] }}/delete"
                               onsubmit="return confirm('¿Borrar este archivo del disco?');">

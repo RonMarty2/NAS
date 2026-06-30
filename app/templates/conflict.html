@@ -48,10 +48,17 @@
     </section>
   </div>
 
+  {% if not target.safe_to_delete_pending %}
+    <div class="target-warning target-warning-strong conflict-warning">
+      <strong>No borres el pendiente todavia</strong>
+      <span>No se pudo confirmar que el destino sea igual al archivo nuevo. Pendiente: {{ target.source_size_bytes|filesizeformat }}. Destino: {{ target.dest_size_bytes|filesizeformat }}. Para evitar perder una copia buena, solo puedes reemplazar con el nuevo o mantener ambos.</span>
+    </div>
+  {% endif %}
+
   <div class="decision-panel">
     <form method="post" action="/item/{{ item['id'] }}/conflict/keep-existing"
           onsubmit="return confirmAndMarkDelete(this, 'Se borrara el archivo nuevo de descargas y se conservara el que ya esta en la biblioteca. Continuar?');">
-      <button class="btn btn-danger" type="submit">Mantener existente y borrar pendiente</button>
+      <button class="btn btn-danger" type="submit" {% if not target.safe_to_delete_pending %}disabled title="Bloqueado: el destino pesa distinto"{% endif %}>Mantener existente y borrar pendiente</button>
     </form>
 
     <form method="post" action="/item/{{ item['id'] }}/conflict/replace"

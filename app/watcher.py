@@ -372,7 +372,6 @@ def scan_once():
     root = config.get("downloads_dir")
     if not root or not os.path.isdir(root):
         return 0
-    reconcile_pending_moves()
     cleanup_missing_pending()
     seen = 0
     nuevos = 0

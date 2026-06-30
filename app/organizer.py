@@ -111,7 +111,7 @@ def unique_path(path):
     return f"{base} ({n}){ext}"
 
 
-def cleanup_temp_copies(roots=None, max_age_seconds=6 * 60 * 60, delete_all=False):
+def cleanup_temp_copies(roots=None, max_age_seconds=6 * 60 * 60, delete_all=False, recursive=True):
     """Borra temporales propios de copias interrumpidas.
 
     Solo toca archivos ocultos creados por esta app con patrón:
@@ -124,26 +124,44 @@ def cleanup_temp_copies(roots=None, max_age_seconds=6 * 60 * 60, delete_all=Fals
     freed = 0
     errors = 0
 
+    seen_roots = set()
     for root in roots:
         if not root or not os.path.isdir(root):
             continue
-        for dirpath, _dirs, files in os.walk(root):
-            for name in files:
-                if not _is_copy_temp_name(name):
+        root = os.path.abspath(root)
+        if root in seen_roots:
+            continue
+        seen_roots.add(root)
+        for path in _iter_copy_temps(root, recursive=recursive):
+            try:
+                age = now - os.path.getmtime(path)
+                if not delete_all and age < max_age_seconds:
                     continue
-                path = os.path.join(dirpath, name)
-                try:
-                    age = now - os.path.getmtime(path)
-                    if not delete_all and age < max_age_seconds:
-                        continue
-                    size = os.path.getsize(path)
-                    os.remove(path)
-                    removed += 1
-                    freed += size
-                except OSError:
-                    errors += 1
+                size = os.path.getsize(path)
+                os.remove(path)
+                removed += 1
+                freed += size
+            except OSError:
+                errors += 1
 
     return {"removed": removed, "freed_bytes": freed, "errors": errors}
+
+
+def _iter_copy_temps(root, recursive=True):
+    if recursive:
+        for dirpath, _dirs, files in os.walk(root):
+            for name in files:
+                if _is_copy_temp_name(name):
+                    yield os.path.join(dirpath, name)
+        return
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(root, name)
+        if _is_copy_temp_name(name) and os.path.isfile(path):
+            yield path
 
 
 def _library_roots():
@@ -183,6 +201,7 @@ def _copy_to_temp_then_replace(src, dest, replaced):
         f".{os.path.basename(dest)}{_COPYING_TOKEN}{uuid.uuid4().hex}{_COPYING_SUFFIX}",
     )
     expected_size = os.path.getsize(src)
+    _ensure_free_space_for_copy(os.path.dirname(dest), expected_size)
     try:
         with open(src, "rb") as in_f, open(tmp_dest, "wb") as out_f:
             shutil.copyfileobj(in_f, out_f, length=1024 * 1024 * 16)
@@ -205,6 +224,34 @@ def _copy_to_temp_then_replace(src, dest, replaced):
         except OSError:
             pass
         raise
+
+
+def _ensure_free_space_for_copy(dest_folder, expected_size):
+    """Fallback copy needs a full temporary file before publishing final dest."""
+    try:
+        free = shutil.disk_usage(dest_folder).free
+    except OSError:
+        return
+    reserve = min(max(256 * 1024 * 1024, expected_size // 20), 2 * 1024 * 1024 * 1024)
+    needed = expected_size + reserve
+    if free < needed:
+        raise IOError(
+            "Espacio insuficiente para una copia segura: "
+            f"libre {_human_size(free)}, necesario {_human_size(needed)}."
+        )
+
+
+def _human_size(value):
+    n = float(value or 0)
+    units = ["B", "KB", "MB", "GB", "TB"]
+    unit = units[0]
+    for unit in units:
+        if n < 1024 or unit == units[-1]:
+            break
+        n /= 1024
+    if unit in ("B", "KB"):
+        return f"{int(n)} {unit}"
+    return f"{n:.1f} {unit}"
 
 
 def _fsync_parent(path):

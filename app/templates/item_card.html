@@ -43,7 +43,7 @@
 
     {% if item["status"] == "processing" %}
       {# ---- En movimiento: nada que tocar, solo mostrar progreso ---- #}
-      <p class="processing">⏳ Moviendo… <small>(si es un archivo grande puede tardar unos minutos; la página se actualiza sola)</small></p>
+      <p class="processing">⏳ En cola / moviendo… <small>(el NAS procesa un archivo a la vez; la página se actualiza sola)</small></p>
       <p class="preview">Destino: <span>{{ item["dest_folder"] }}/{{ leaves[item['id']] }}</span></p>
       <form method="post" action="/item/{{ item['id'] }}/reset-processing"
             onsubmit="return confirm('Esto solo quita el reloj y devuelve el item a pendiente. Usalo si lleva mucho tiempo sin avanzar. Continuar?');">
@@ -92,10 +92,12 @@
       </form>
       {% if target.exact_exists %}
       <a class="btn btn-secondary" href="/item/{{ item['id'] }}/conflict">Comparar versiones</a>
-      <form method="post" action="/item/{{ item['id'] }}/delete"
-            onsubmit="return confirm('Este archivo final ya existe en destino. Se borrara solo el pendiente de descargas. Continuar?');">
-        <button class="btn btn-danger" type="submit">Borrar pendiente</button>
-      </form>
+        {% if target.safe_to_delete_pending %}
+          <form method="post" action="/item/{{ item['id'] }}/delete"
+                onsubmit="return confirm('Este archivo final ya existe en destino y pesa igual. Se borrara solo el pendiente de descargas. Continuar?');">
+            <button class="btn btn-danger" type="submit">Borrar pendiente</button>
+          </form>
+        {% endif %}
       {% else %}
       <form method="post" action="/item/{{ item['id'] }}/delete"
             onsubmit="return confirm('¿Borrar el archivo del disco? Esta acción no se puede deshacer.');">

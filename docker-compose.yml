@@ -6,7 +6,7 @@ services:
     # (Detener → Limpiar → borrar imagen en la pestaña Imagen → Construir).
     image: ghcr.io/ronmarty2/nas-organizer:latest
     container_name: nas-organizer
-    restart: unless-stopped
+    restart: always
     ports:
       # Cambia 8678 si ese puerto ya está ocupado en tu NAS.
       - "8678:8678"
