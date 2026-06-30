@@ -254,11 +254,14 @@ def cleanup_missing_pending():
     destino, se borra el registro huérfano.
     """
     removed = 0
-    reconciled, _removed = reconcile_pending_moves()
-    removed += _removed
+    try:
+        _reconciled, _removed = reconcile_pending_moves()
+        removed += _removed
+    except Exception:
+        pass
     for it in db.list_items(status="pending"):
         path = it["original_path"]
-        if path and not os.path.exists(path):
+        if path and not _path_exists(path):
             db.delete_item(it["id"])
             removed += 1
     return removed
@@ -276,26 +279,36 @@ def reconcile_pending_moves():
     items = db.list_items(status="processing") + db.list_items(status="pending")
     seen = set()
     for it in items:
-        if it["id"] in seen:
+        try:
+            if it["id"] in seen:
+                continue
+            seen.add(it["id"])
+            src = it["original_path"]
+            if src and _path_exists(src):
+                continue
+            dest = it["dest_path"] or _expected_dest(it)
+            if dest and _path_exists(dest):
+                db.update_item(
+                    it["id"],
+                    status="done",
+                    dest_path=dest,
+                    processed_at=_now(),
+                    error=None,
+                )
+                reconciled += 1
+            elif it["status"] == "pending":
+                db.delete_item(it["id"])
+                removed += 1
+        except Exception:
             continue
-        seen.add(it["id"])
-        src = it["original_path"]
-        if src and os.path.exists(src):
-            continue
-        dest = it["dest_path"] or _expected_dest(it)
-        if dest and os.path.exists(dest):
-            db.update_item(
-                it["id"],
-                status="done",
-                dest_path=dest,
-                processed_at=_now(),
-                error=None,
-            )
-            reconciled += 1
-        elif it["status"] == "pending":
-            db.delete_item(it["id"])
-            removed += 1
     return reconciled, removed
+
+
+def _path_exists(path):
+    try:
+        return bool(path and os.path.exists(path))
+    except (OSError, ValueError, TypeError):
+        return False
 
 
 def _expected_dest(item):
