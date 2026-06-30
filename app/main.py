@@ -41,6 +41,7 @@ LOCAL_METADATA_LOCK = threading.Lock()
 def _startup():
     db.init_db()
     db.reset_processing()  # recupera movimientos que quedaron a medias
+    watcher.reconcile_pending_moves()
     _set_dedup_state({})
     _set_delete_dup_state({})
     _recover_scan_state()
@@ -520,6 +521,7 @@ def _start_delete_dup_job(item_id):
 
 @app.get("/tab/{media_type}", response_class=HTMLResponse)
 def tab(request: Request, media_type: str, dedup: int = 0):
+    watcher.reconcile_pending_moves()
     # Mostramos lo pendiente y lo que se está moviendo (para ver el progreso).
     processing = db.list_items(status="processing", media_type=media_type)
     pending = db.list_items(status="pending", media_type=media_type)

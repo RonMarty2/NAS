@@ -7,8 +7,9 @@ estable, lo identifica y busca sus metadatos, dejándolo listo para revisión.
 import os
 import threading
 import time
+from datetime import datetime
 
-from . import config, db, filemeta, identify, notify
+from . import config, db, filemeta, identify, notify, organizer
 from .metadata import music as music_meta
 from .metadata import tmdb
 
@@ -247,12 +248,14 @@ def _meaningful_text(value):
 
 
 def cleanup_missing_pending():
-    """Elimina registros pendientes cuyo archivo ya no existe en disco.
+    """Limpia pendientes cuyo archivo de origen ya no existe en disco.
 
-    Esto evita que la UI siga marcando como duplicado algo que ya fue borrado
-    fuera de la app o que desapareció antes del siguiente escaneo.
+    Si el destino ya existe, primero se marca como movido. Si tampoco hay
+    destino, se borra el registro huérfano.
     """
     removed = 0
+    reconciled, _removed = reconcile_pending_moves()
+    removed += _removed
     for it in db.list_items(status="pending"):
         path = it["original_path"]
         if path and not os.path.exists(path):
@@ -261,11 +264,57 @@ def cleanup_missing_pending():
     return removed
 
 
+def reconcile_pending_moves():
+    """Repara movimientos que quedaron hechos en disco pero no en la BD.
+
+    Si el NAS se apaga justo después de mover el archivo pero antes de guardar
+    status='done', el origen desaparece y el destino ya existe. En ese caso no
+    hay conflicto real ni copia extra: marcamos el item como movido.
+    """
+    reconciled = 0
+    removed = 0
+    items = db.list_items(status="processing") + db.list_items(status="pending")
+    seen = set()
+    for it in items:
+        if it["id"] in seen:
+            continue
+        seen.add(it["id"])
+        src = it["original_path"]
+        if src and os.path.exists(src):
+            continue
+        dest = it["dest_path"] or _expected_dest(it)
+        if dest and os.path.exists(dest):
+            db.update_item(
+                it["id"],
+                status="done",
+                dest_path=dest,
+                processed_at=_now(),
+                error=None,
+            )
+            reconciled += 1
+        elif it["status"] == "pending":
+            db.delete_item(it["id"])
+            removed += 1
+    return reconciled, removed
+
+
+def _expected_dest(item):
+    try:
+        return organizer.build_dest(item)
+    except Exception:
+        return None
+
+
+def _now():
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
 def scan_once():
     """Recorre la carpeta de descargas una vez. Devuelve nº de archivos vistos."""
     root = config.get("downloads_dir")
     if not root or not os.path.isdir(root):
         return 0
+    reconcile_pending_moves()
     cleanup_missing_pending()
     seen = 0
     nuevos = 0
