@@ -438,7 +438,10 @@ def move_item(item, on_existing="error"):
         return False, None, f"El archivo de origen ya no existe: {src}"
 
     dest = build_dest(item)
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    try:
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+    except OSError as e:
+        return False, None, f"No pude crear la carpeta destino: {e}"
     if os.path.exists(dest):
         if on_existing == "keep_both":
             dest = unique_path(dest)

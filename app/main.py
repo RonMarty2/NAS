@@ -956,6 +956,17 @@ def _move_worker_loop():
             with MOVE_LOCK:
                 MOVE_QUEUED.discard(item_id)
             _do_move(item_id, on_existing)
+        except Exception as exc:
+            # Nunca dejar morir al worker: si un movimiento falla de forma
+            # inesperada, marcamos el item como error y seguimos con la cola.
+            # (Antes, una excepción aquí mataba el hilo y TODOS los movimientos
+            # siguientes se quedaban en cola para siempre, atascados en
+            # "procesando".)
+            try:
+                db.update_item(item_id, status="error",
+                               error=f"Error inesperado al mover: {exc}")
+            except Exception:
+                pass
         finally:
             MOVE_QUEUE.task_done()
 
