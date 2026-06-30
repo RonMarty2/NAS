@@ -195,12 +195,54 @@ def _replace_or_move(src, dest):
         return _copy_to_temp_then_replace(src, dest, replaced)
 
 
+def _reflink_clone(src, dst):
+    """Intenta un clon copy-on-write de btrfs (instantáneo, sin copiar datos).
+
+    En Synology (btrfs) esto permite "mover" entre carpetas compartidas distintas
+    casi al instante —igual que File Station— en vez de copiar gigabytes byte a
+    byte. Devuelve True si funcionó. Si el sistema de archivos no lo soporta
+    (no es btrfs, o no es el mismo volumen), devuelve False y se usa la copia
+    normal como respaldo, así que nunca empeora nada."""
+    try:
+        import fcntl
+        FICLONE = 0x40049409  # ioctl de clonado CoW (mismo en arquitecturas comunes)
+        with open(src, "rb") as s, open(dst, "wb") as d:
+            fcntl.ioctl(d.fileno(), FICLONE, s.fileno())
+        return True
+    except Exception:
+        try:
+            if os.path.exists(dst):
+                os.remove(dst)
+        except OSError:
+            pass
+        return False
+
+
 def _copy_to_temp_then_replace(src, dest, replaced):
     tmp_dest = os.path.join(
         os.path.dirname(dest),
         f".{os.path.basename(dest)}{_COPYING_TOKEN}{uuid.uuid4().hex}{_COPYING_SUFFIX}",
     )
     expected_size = os.path.getsize(src)
+
+    # Camino rápido: clon CoW de btrfs (instantáneo). Si no se puede, seguimos
+    # con la copia byte a byte de toda la vida.
+    if _reflink_clone(src, tmp_dest):
+        try:
+            if os.path.getsize(tmp_dest) == expected_size:
+                shutil.copystat(src, tmp_dest, follow_symlinks=True)
+                os.replace(tmp_dest, dest)
+                _fsync_parent(dest)
+                os.remove(src)
+                return replaced
+            os.remove(tmp_dest)  # tamaño raro: descarta y cae al respaldo
+        except OSError:
+            try:
+                if os.path.exists(tmp_dest):
+                    os.remove(tmp_dest)
+            except OSError:
+                pass
+
     _ensure_free_space_for_copy(os.path.dirname(dest), expected_size)
     try:
         with open(src, "rb") as in_f, open(tmp_dest, "wb") as out_f:
