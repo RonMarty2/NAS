@@ -603,7 +603,7 @@ def _target_check_html(summary):
             '<div class="target-warning target-warning-strong">'
             '<strong>Ya existe en destino</strong>'
             f'<span>{summary["exact_count"]} archivo{plural} final{plural} ya existe{"" if summary["exact_count"] == 1 else "n"}. '
-            'Si confirmas, la app no pisa nada: creará copia con “(2)”.'
+            'Al confirmar, podras comparar y elegir que conservar.'
             + (f' Ejemplo: {examples}.' if examples else '')
             + '</span></div>'
         )
@@ -700,14 +700,62 @@ def _redirect_to_type(media_type):
     return RedirectResponse(f"/tab/{media_type}", status_code=303)
 
 
-DEST_EXISTS_ERROR = (
-    "Ya existe en destino. No se movio para evitar crear una copia (2). "
-    "Si ese episodio ya esta correcto en Jellyfin, borra este pendiente de descargas."
-)
+CONFLICT_NOTICE = "Ya existe en destino. Compara versiones y elige cual conservar."
 
 
 def _destination_exists(item, dest_folder):
     return targets.inspect(item, dest_folder)["exact_exists"]
+
+
+def _target_detail(item):
+    base = item["dest_folder"] or organizer.default_base(item["media_type"])
+    return targets.inspect(item, base)
+
+
+def _allow_probe():
+    return str(config.get("probe_media_info")).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _file_summary(path, filename=None, size_bytes=0, media_info=""):
+    filename = filename or os.path.basename(path or "")
+    info = filemeta.from_json(media_info)
+    if not info:
+        info = filemeta.inspect_file(path or "", filename=filename, size_bytes=size_bytes, allow_probe=_allow_probe())
+    elif not info.get("size_bytes"):
+        info["size_bytes"] = size_bytes or 0
+
+    display_item = {
+        "media_info": filemeta.to_json(info),
+        "original_path": path or "",
+        "filename": filename,
+        "size_bytes": info.get("size_bytes") or size_bytes or 0,
+    }
+    modified = ""
+    if path and os.path.exists(path):
+        try:
+            from datetime import datetime
+            modified = datetime.fromtimestamp(os.path.getmtime(path)).strftime("%Y-%m-%d %H:%M:%S")
+        except OSError:
+            modified = ""
+
+    return {
+        "path": path or "",
+        "filename": filename,
+        "exists": bool(path and os.path.exists(path)),
+        "facts": filemeta.display_info(display_item)["facts"],
+        "modified": modified,
+    }
+
+
+def _start_move(item_id, on_existing="error"):
+    item = db.get_item(item_id)
+    if not item:
+        return RedirectResponse("/", status_code=303)
+    if item["status"] == "processing":
+        return _redirect_to_type(item["media_type"])
+    db.update_item(item_id, status="processing", error=None)
+    threading.Thread(target=_do_move, args=(item_id, on_existing), daemon=True).start()
+    return _redirect_to_type(item["media_type"])
 
 
 def _delete_item_file_and_record(item):
@@ -720,13 +768,13 @@ def _delete_item_file_and_record(item):
         db.delete_item(item["id"])
 
 
-def _do_move(item_id):
+def _do_move(item_id, on_existing="error"):
     """Mueve el archivo en segundo plano (puede tardar si hay que copiar GB) y
     actualiza el estado al terminar. Así la web no se queda congelada."""
     item = db.get_item(item_id)
     if not item:
         return
-    ok, dest, message = organizer.move_item(item)
+    ok, dest, message = organizer.move_item(item, on_existing=on_existing)
     if ok:
         db.update_item(item_id, status="done", dest_path=dest,
                        processed_at=_now(), error=None)
@@ -751,14 +799,12 @@ def confirm(item_id: int, dest_folder: str = Form(""), new_subfolder: str = Form
                        error="La carpeta destino está fuera de las rutas permitidas.")
         return _redirect_to_type(item["media_type"])
     if _destination_exists(item, target):
-        db.update_item(item_id, dest_folder=target, status="pending",
-                       error=DEST_EXISTS_ERROR)
-        return _redirect_to_type(item["media_type"])
+        db.update_item(item_id, dest_folder=target, status="pending", error=None)
+        return RedirectResponse(f"/item/{item_id}/conflict", status_code=303)
 
     # Marcamos como "procesando" y movemos en segundo plano (no bloquea la página).
-    db.update_item(item_id, dest_folder=target, status="processing", error=None)
-    threading.Thread(target=_do_move, args=(item_id,), daemon=True).start()
-    return _redirect_to_type(item["media_type"])
+    db.update_item(item_id, dest_folder=target)
+    return _start_move(item_id)
 
 
 @app.post("/series/confirm-all")
@@ -774,12 +820,64 @@ def confirm_series(ids: List[int] = Form(...), dest_folder: str = Form(""),
         if not item or item["status"] != "pending":
             continue
         if _destination_exists(item, target):
-            db.update_item(item_id, dest_folder=target, status="pending",
-                           error=DEST_EXISTS_ERROR)
+            db.update_item(item_id, dest_folder=target, status="pending", error=CONFLICT_NOTICE)
             continue
         db.update_item(item_id, dest_folder=target, status="processing", error=None)
         threading.Thread(target=_do_move, args=(item_id,), daemon=True).start()
     return _redirect_to_type("series")
+
+
+@app.get("/item/{item_id}/conflict", response_class=HTMLResponse)
+def conflict_form(request: Request, item_id: int):
+    item = db.get_item(item_id)
+    if not item:
+        return RedirectResponse("/", status_code=303)
+    target = _target_detail(item)
+    if not target["exact_exists"]:
+        db.update_item(item_id, error=None)
+        return _redirect_to_type(item["media_type"])
+
+    pending = _file_summary(
+        item["original_path"],
+        filename=item["filename"],
+        size_bytes=item["size_bytes"],
+        media_info=item["media_info"],
+    )
+    existing = _file_summary(target["dest_path"])
+    return templates.TemplateResponse("conflict.html", {
+        "request": request,
+        "tabs": TABS,
+        "active": item["media_type"],
+        "tab_counts": db.pending_counts(),
+        **_base_context(),
+        "dedup_running": bool(_dedup_state().get("running")),
+        "delete_dup_running": bool(_delete_dup_state().get("running")),
+        "item": item,
+        "target": target,
+        "pending": pending,
+        "existing": existing,
+    })
+
+
+@app.post("/item/{item_id}/conflict/keep-existing")
+def conflict_keep_existing(item_id: int):
+    item = db.get_item(item_id)
+    mt = item["media_type"] if item else "movie"
+    if item and _target_detail(item)["exact_exists"]:
+        _delete_item_file_and_record(item)
+    elif item:
+        db.update_item(item_id, error="Ya no existe un archivo en destino para comparar.")
+    return _redirect_to_type(mt)
+
+
+@app.post("/item/{item_id}/conflict/replace")
+def conflict_replace(item_id: int):
+    return _start_move(item_id, on_existing="replace")
+
+
+@app.post("/item/{item_id}/conflict/keep-both")
+def conflict_keep_both(item_id: int):
+    return _start_move(item_id, on_existing="keep_both")
 
 
 @app.post("/series/delete-existing")

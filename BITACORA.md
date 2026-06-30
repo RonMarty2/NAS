@@ -37,7 +37,7 @@ decide; la app sugiere y ejecuta.
 - **Navegador de carpetas tipo árbol** para elegir el destino (entrar/salir, crear subcarpeta)
   con **vista previa** de la ruta final.
 - **Movimiento en segundo plano** (no congela la web) + **instantáneo** (montaje único de
-  `/volume1`, sin copiar) + **protección anti-sobrescritura** (`… (2)`).
+  `/volume1`, sin copiar) + **comparación de versiones** cuando el destino ya existe.
 - Arrastra **subtítulos** junto al vídeo.
 - **Refresco de Jellyfin** incremental tras mover + botón "Actualizar todo".
 - **PWA instalable** (icono propio, pantalla completa).
@@ -356,9 +356,8 @@ Pendiente: conectar Jellyfin (URL+API key), y elegir mejoras del roadmap (§8).
   avanzada más adelante.
 
 ### Sesión 10 — 2026-06-09 (destino existente y relojes atascados)
-- Si un episodio/película ya tiene el archivo final exacto en destino, la app **ya no lo mueve**
-  ni crea copia `(2)`. Lo deja pendiente con aviso para que el usuario borre el pendiente de
-  descargas si Jellyfin ya está correcto.
+- Si un episodio/película ya tiene el archivo final exacto en destino, la app **ya no decide sola**:
+  permite comparar existente vs nuevo y elegir entre borrar pendiente, reemplazar o conservar ambos.
 - En Series se añadió botón para **borrar de golpe los pendientes que ya existen en destino**.
   Solo borra la descarga pendiente; no toca la biblioteca.
 - Si un item queda con reloj (`processing`) demasiado tiempo, aparece una acción para devolverlo
