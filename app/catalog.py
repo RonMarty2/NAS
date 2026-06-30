@@ -1,6 +1,7 @@
 """Catalogo visual: sagas, peliculas que tienes y faltantes."""
 import json
 import os
+import threading
 import time
 
 from . import config, db, identify
@@ -10,6 +11,22 @@ from .metadata import tmdb
 STATUS_KEY = "catalog_status"
 CACHE_TTL_SECONDS = 30 * 24 * 60 * 60
 SKIP_DIR_NAMES = {"@eadir", "#recycle", "@tmp", ".trash", "$recycle.bin"}
+
+# Caché del catálogo ya armado. build_catalog recorre toda la tabla y parsea el
+# JSON de cada película/saga; con bibliotecas grandes eso es caro y se repetía en
+# cada apertura de la pestaña (y en cada recarga del sondeo durante una
+# importación). Una caché corta lo hace fluido; se refresca solo tras unos
+# segundos o cuando algo cambia (mover una peli, importar). Ver invalidate_build().
+_BUILD_TTL = 15.0
+_build_cache = None
+_build_cache_at = 0.0
+_build_lock = threading.Lock()
+
+
+def invalidate_build():
+    """Olvida el catálogo armado para que la próxima vista lo recalcule."""
+    global _build_cache
+    _build_cache = None
 
 
 def status():
@@ -107,7 +124,21 @@ def update_catalog(limit=60, progress=None):
     }
 
 
-def build_catalog():
+def build_catalog(force=False):
+    """Catálogo armado, con caché corta para que la pestaña sea fluida."""
+    global _build_cache, _build_cache_at
+    if not force and _build_cache is not None and (time.monotonic() - _build_cache_at) < _BUILD_TTL:
+        return _build_cache
+    with _build_lock:
+        if not force and _build_cache is not None and (time.monotonic() - _build_cache_at) < _BUILD_TTL:
+            return _build_cache
+        result = _build_catalog_uncached()
+        _build_cache = result
+        _build_cache_at = time.monotonic()
+        return result
+
+
+def _build_catalog_uncached():
     done_items = db.list_items(status="done", media_type="movie")
     catalog_rows = db.list_catalog_files(missing=False)
     items = owned_movie_entries(done_items=done_items, catalog_rows=catalog_rows)

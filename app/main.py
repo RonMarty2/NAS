@@ -835,6 +835,7 @@ def _start_catalog_import(folder, limit):
                 })
 
             result = catalog.import_folder(folder, enrich_limit=limit, progress=push)
+            catalog.invalidate_build()
             catalog.set_status({
                 "running": False,
                 "message": result.get("message", "Importacion terminada."),
@@ -878,6 +879,7 @@ def _start_catalog_update(limit):
                 })
 
             result = catalog.update_catalog(limit=limit, progress=push)
+            catalog.invalidate_build()
             catalog.set_status({
                 "running": False,
                 "message": result.get("message", "Catalogo actualizado."),
@@ -1173,6 +1175,7 @@ def _do_move(item_id, on_existing="error"):
     if ok:
         db.update_item(item_id, status="done", dest_path=dest,
                        processed_at=_now(), error=None)
+        catalog.invalidate_build()  # una peli nueva entra al catálogo
         _schedule_jellyfin_refresh()
     elif message and message.startswith("Ya existe en destino"):
         db.update_item(item_id, status="pending", error=message)
