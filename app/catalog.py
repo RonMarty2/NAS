@@ -9,6 +9,7 @@ from .metadata import tmdb
 
 STATUS_KEY = "catalog_status"
 CACHE_TTL_SECONDS = 30 * 24 * 60 * 60
+SKIP_DIR_NAMES = {"@eadir", "#recycle", "@tmp", ".trash", "$recycle.bin"}
 
 
 def status():
@@ -32,16 +33,18 @@ def owned_movie_items():
     return db.list_items(status="done", media_type="movie")
 
 
-def owned_movie_entries():
+def owned_movie_entries(done_items=None, catalog_rows=None):
     entries = []
     seen = set()
-    for item in db.list_items(status="done", media_type="movie"):
+    done_items = db.list_items(status="done", media_type="movie") if done_items is None else done_items
+    catalog_rows = db.list_catalog_files(missing=False) if catalog_rows is None else catalog_rows
+    for item in done_items:
         tmdb_id = _int(item["tmdb_id"])
         if not tmdb_id:
             continue
         seen.add(tmdb_id)
         entries.append(_entry_from_item(item, "organizer"))
-    for row in db.list_catalog_files(missing=False):
+    for row in catalog_rows:
         if row["media_type"] != "movie":
             continue
         tmdb_id = _int(row["tmdb_id"])
@@ -59,58 +62,76 @@ def update_catalog(limit=60, progress=None):
 
     items = owned_movie_entries()
     total = len(items)
-    done = 0
+    limit = max(0, int(limit or 0))
+    if limit <= 0:
+        return {"done": 0, "total": total, "collections": 0, "message": "Catalogo actualizado: 0 consulta(s)."}
+    queries = 0
+    scanned = 0
     collection_ids = set()
 
     for item in items:
-        if done >= limit:
-            break
+        scanned += 1
         tmdb_id = _int(item["tmdb_id"])
         detail = movie_detail(tmdb_id)
-        if not detail or _cache_stale(f"movie:{tmdb_id}"):
+        if (not detail or _cache_stale(f"movie:{tmdb_id}")) and queries < limit:
             detail = tmdb.movie_details(tmdb_id)
             if detail:
                 _set_json(f"movie:{tmdb_id}", detail)
+            queries += 1
         collection = (detail or {}).get("collection") or {}
         if collection.get("id"):
             collection_ids.add(_int(collection["id"]))
-        done += 1
-        if progress:
-            progress({"done": done, "total": total, "current": item["filename"]})
+        if progress and scanned % 20 == 0:
+            progress({"done": queries, "total": total, "current": item["filename"]})
+        if queries >= limit:
+            break
 
     collection_done = 0
     for collection_id in sorted(x for x in collection_ids if x):
-        if done >= limit:
+        if queries >= limit:
             break
         if _cache_stale(f"collection:{collection_id}"):
             detail = tmdb.collection_details(collection_id)
             if detail:
                 _set_json(f"collection:{collection_id}", detail)
+            queries += 1
         collection_done += 1
-        done += 1
         if progress:
-            progress({"done": done, "total": total + len(collection_ids), "current": f"Saga {collection_id}"})
+            progress({"done": queries, "total": total + len(collection_ids), "current": f"Saga {collection_id}"})
 
     return {
-        "done": done,
+        "done": queries,
         "total": total,
         "collections": collection_done,
-        "message": f"Catalogo actualizado: {done} consulta(s).",
+        "message": f"Catalogo actualizado: {queries} consulta(s).",
     }
 
 
 def build_catalog():
-    items = owned_movie_entries()
+    done_items = db.list_items(status="done", media_type="movie")
+    catalog_rows = db.list_catalog_files(missing=False)
+    items = owned_movie_entries(done_items=done_items, catalog_rows=catalog_rows)
     owned_by_id = {_int(item["tmdb_id"]): item for item in items if _int(item["tmdb_id"])}
+    movie_cache = db.get_catalog_cache_many(f"movie:{_int(item['tmdb_id'])}" for item in items if _int(item["tmdb_id"]))
+    movie_details = {}
+    collection_ids = set()
+    for item in items:
+        tmdb_id = _int(item["tmdb_id"])
+        detail = _json_from_row(movie_cache.get(f"movie:{tmdb_id}"))
+        movie_details[tmdb_id] = detail
+        collection = (detail or {}).get("collection") or {}
+        if collection.get("id"):
+            collection_ids.add(_int(collection["id"]))
+    collection_cache = db.get_catalog_cache_many(f"collection:{collection_id}" for collection_id in collection_ids)
     collections = {}
     standalone = []
     companies = {}
     uncached = 0
-    series = _series_entries()
+    series = _series_entries(catalog_rows)
 
     for item in items:
         tmdb_id = _int(item["tmdb_id"])
-        detail = movie_detail(tmdb_id)
+        detail = movie_details.get(tmdb_id)
         if not detail:
             uncached += 1
             standalone.append(_movie_from_item(item, owned=True))
@@ -132,7 +153,7 @@ def build_catalog():
                     "missing_count": 0,
                 },
             )
-            collection_detail = collection_detail_cached(collection_id)
+            collection_detail = _json_from_row(collection_cache.get(f"collection:{collection_id}"))
             if collection_detail:
                 entry["name"] = collection_detail.get("name") or entry["name"]
                 entry["poster_url"] = collection_detail.get("poster_url") or entry["poster_url"]
@@ -143,7 +164,7 @@ def build_catalog():
         else:
             standalone.append(_detail_to_movie(detail, owned=True, item=item))
 
-    for row in db.list_catalog_files(missing=False):
+    for row in catalog_rows:
         if row["media_type"] == "movie" and not _int(row["tmdb_id"]):
             uncached += 1
             standalone.append(_movie_from_item(_entry_from_catalog_file(row), owned=True))
@@ -170,7 +191,7 @@ def build_catalog():
         "companies": companies_list,
         "series": series[:80],
         "owned_total": len(items),
-        "imported_total": len(db.list_catalog_files(missing=False)),
+        "imported_total": len(catalog_rows),
         "uncached": uncached,
         "tmdb_configured": tmdb.configured(),
     }
@@ -185,6 +206,9 @@ def import_folder(root, enrich_limit=80, progress=None):
     root = (root or "").strip()
     if not root or not os.path.isdir(root):
         return {"scanned": 0, "matched": 0, "message": "La carpeta no existe o no es accesible."}
+    if not _within_catalog_roots(root):
+        return {"scanned": 0, "matched": 0, "message": "Esa carpeta esta fuera de las bibliotecas configuradas."}
+    scan_ts = time.time()
     scanned = 0
     matched = 0
     skipped = 0
@@ -198,6 +222,7 @@ def import_folder(root, enrich_limit=80, progress=None):
             filename = os.path.basename(path)
             changed = not existing or existing["size_bytes"] != stat.st_size or existing["mtime_ns"] != stat.st_mtime_ns
             if existing and not changed and existing["tmdb_id"]:
+                db.touch_catalog_file(path, last_seen=scan_ts)
                 skipped += 1
                 continue
             ident = identify.identify(path)
@@ -209,7 +234,7 @@ def import_folder(root, enrich_limit=80, progress=None):
                 "year": ident.get("year"),
                 "quality": quality,
                 "langs": langs,
-                "last_seen": time.time(),
+                "last_seen": scan_ts,
                 "missing": 0,
                 "source": "scan",
             }
@@ -248,6 +273,7 @@ def import_folder(root, enrich_limit=80, progress=None):
                 })
         except Exception:
             errors += 1
+    db.mark_catalog_missing_under_root(root, scan_ts)
     return {
         "scanned": scanned,
         "matched": matched,
@@ -269,10 +295,36 @@ def suggested_roots():
     return roots
 
 
-def _series_entries():
+def _catalog_roots():
+    roots = suggested_roots()
+    for path in [x.strip() for x in config.get("library_roots").split(",") if x.strip()]:
+        if path and path not in roots:
+            roots.append(path)
+    return roots
+
+
+def _within_catalog_roots(path):
+    try:
+        rp = os.path.realpath(path)
+    except (OSError, TypeError):
+        return False
+    for root in _catalog_roots():
+        if not root:
+            continue
+        try:
+            rr = os.path.realpath(root)
+        except (OSError, TypeError):
+            continue
+        if rp == rr or rp.startswith(rr + os.sep):
+            return True
+    return False
+
+
+def _series_entries(catalog_rows=None):
     out = []
     seen = set()
-    for row in db.list_catalog_files(missing=False):
+    catalog_rows = db.list_catalog_files(missing=False) if catalog_rows is None else catalog_rows
+    for row in catalog_rows:
         if row["media_type"] != "series":
             continue
         key = (row["title"] or row["filename"]).lower()
@@ -380,10 +432,15 @@ def _entry_from_catalog_file(row):
 def _iter_video_files(root):
     video_exts = config.ext_list("video_exts")
     for dirpath, dirs, files in os.walk(root):
-        dirs[:] = [d for d in dirs if not d.startswith("@eaDir")]
+        dirs[:] = [d for d in dirs if not _skip_dir(d)]
         for name in files:
             if os.path.splitext(name)[1].lower() in video_exts:
                 yield os.path.join(dirpath, name)
+
+
+def _skip_dir(name):
+    low = (name or "").lower()
+    return low in SKIP_DIR_NAMES or low.startswith("@eadir")
 
 
 def _fallback_title(filename):
@@ -403,6 +460,10 @@ def _collect_companies(companies, detail):
 
 def _get_json(cache_key):
     row = db.get_catalog_cache(cache_key)
+    return _json_from_row(row)
+
+
+def _json_from_row(row):
     if not row:
         return None
     try:

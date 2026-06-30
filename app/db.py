@@ -237,6 +237,24 @@ def get_catalog_cache(cache_key):
         return row
 
 
+def get_catalog_cache_many(cache_keys):
+    keys = [k for k in dict.fromkeys(cache_keys) if k]
+    if not keys:
+        return {}
+    out = {}
+    with get_conn() as conn:
+        for i in range(0, len(keys), 400):
+            chunk = keys[i:i + 400]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = conn.execute(
+                f"SELECT cache_key, value, updated_at FROM catalog_cache WHERE cache_key IN ({placeholders})",
+                chunk,
+            ).fetchall()
+            for row in rows:
+                out[row["cache_key"]] = row
+    return out
+
+
 def set_catalog_cache(cache_key, value, updated_at=None):
     if updated_at is None:
         updated_at = time.time()
@@ -274,6 +292,16 @@ def get_catalog_file_by_path(path):
         return conn.execute("SELECT * FROM catalog_files WHERE path=?", (path,)).fetchone()
 
 
+def touch_catalog_file(path, last_seen=None):
+    if last_seen is None:
+        last_seen = time.time()
+    with _lock, get_conn() as conn:
+        conn.execute(
+            "UPDATE catalog_files SET last_seen=?, missing=0 WHERE path=?",
+            (last_seen, path),
+        )
+
+
 def list_catalog_files(missing=None):
     q = "SELECT * FROM catalog_files WHERE 1=1"
     args = []
@@ -290,6 +318,25 @@ def mark_catalog_missing_before(scan_ts):
         conn.execute(
             "UPDATE catalog_files SET missing=1 WHERE source='scan' AND last_seen<?",
             (scan_ts,),
+        )
+
+
+def mark_catalog_missing_under_root(root, scan_ts):
+    root = os.path.normpath(root or "")
+    if not root:
+        return
+    prefixes = {root.rstrip("/\\") + os.sep}
+    prefixes.add(root.rstrip("/\\") + ("/" if os.sep == "\\" else "\\"))
+    clauses = ["path=?"]
+    args = [scan_ts, root]
+    for prefix in sorted(prefixes):
+        clauses.append("substr(path,1,?)=?")
+        args.extend([len(prefix), prefix])
+    with _lock, get_conn() as conn:
+        conn.execute(
+            "UPDATE catalog_files SET missing=1 "
+            "WHERE source='scan' AND last_seen<? AND (" + " OR ".join(clauses) + ")",
+            args,
         )
 
 

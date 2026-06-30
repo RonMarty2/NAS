@@ -15,11 +15,14 @@ from .metadata import tmdb
 
 # Extensiones de archivos incompletos que NUNCA debemos tocar.
 INCOMPLETE_EXTS = {".part", ".tmp", ".!ut", ".crdownload", ".download"}
+SKIP_DIR_NAMES = {"@eadir", "#recycle", "@tmp", ".trash", "$recycle.bin"}
 # Antigüedad mínima (segundos) para considerar un archivo "estable" (terminado).
 STABLE_AGE = 60
 POLL_INTERVAL = 30
 
 _stop = threading.Event()
+_thread = None
+_thread_lock = threading.Lock()
 
 
 def _probe_enabled():
@@ -375,7 +378,8 @@ def scan_once():
     cleanup_missing_pending()
     seen = 0
     nuevos = 0
-    for dirpath, _dirs, files in os.walk(root):
+    for dirpath, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if not _skip_dir(d)]
         for f in files:
             if _process_file(os.path.join(dirpath, f)) is not None:
                 nuevos += 1
@@ -395,6 +399,11 @@ def scan_once():
     return seen
 
 
+def _skip_dir(name):
+    low = (name or "").lower()
+    return low in SKIP_DIR_NAMES or low.startswith("@eadir")
+
+
 def _loop():
     while not _stop.is_set():
         try:
@@ -406,9 +415,14 @@ def _loop():
 
 def start_background():
     """Lanza el hilo de vigilancia en segundo plano."""
-    t = threading.Thread(target=_loop, name="nas-watcher", daemon=True)
-    t.start()
-    return t
+    global _thread
+    with _thread_lock:
+        if _thread and _thread.is_alive():
+            return _thread
+        _stop.clear()
+        _thread = threading.Thread(target=_loop, name="nas-watcher", daemon=True)
+        _thread.start()
+        return _thread
 
 
 def stop():
