@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Auditor de biblioteca NAS</title>
+  <link rel="stylesheet" href="/auditor-static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Auditor de biblioteca NAS</h1>
+      <p>Corre en este PC. Lee el NAS por red y guarda cache para analizar solo cambios.</p>
+    </div>
+    <div class="health">
+      <span class="{{ 'ok' if ffprobe_ok else 'bad' }}">ffprobe {{ 'OK' if ffprobe_ok else 'falta' }}</span>
+      <span class="{{ 'ok' if ffmpeg_ok else 'warn' }}">ffmpeg {{ 'OK' if ffmpeg_ok else 'opcional' }}</span>
+    </div>
+  </header>
+
+  {% if state.message %}
+    <section id="state" class="state {{ 'running' if state.running else 'done' }}"
+             data-running="{{ '1' if state.running else '0' }}">
+      <strong>{{ state.message }}</strong>
+      {% if state.total %}
+        <progress value="{{ state.done }}" max="{{ state.total }}"></progress>
+        <small>{{ state.done }}/{{ state.total }}{% if state.errors %} · errores {{ state.errors }}{% endif %}</small>
+      {% endif %}
+      {% if state.current %}<small class="path">{{ state.current }}</small>{% endif %}
+    </section>
+  {% endif %}
+
+  <main>
+    <section class="panel">
+      <h2>Carpetas del NAS</h2>
+      <form method="post" action="/settings/roots" class="roots-form">
+        <textarea name="roots" rows="3" placeholder="Ejemplo: \\RONNAS\video\peliculas&#10;Z:\video\series">{{ roots_text }}</textarea>
+        <button class="btn secondary" type="submit">Guardar carpetas</button>
+      </form>
+      <div class="actions">
+        <form method="post" action="/scan">
+          <button class="btn primary" type="submit" {% if state.running %}disabled{% endif %}>Escanear cambios</button>
+        </form>
+        <form method="post" action="/analyze">
+          <input type="number" name="limit" value="25" min="1" max="200">
+          <button class="btn primary" type="submit" {% if state.running %}disabled{% endif %}>Analizar pendientes</button>
+        </form>
+      </div>
+      <p class="hint">Escanear solo mira nombres, tamanos y fechas. Analizar usa ffprobe de este PC, uno por uno.</p>
+    </section>
+
+    <section class="stats">
+      <div><strong>{{ stats.total or 0 }}</strong><span>archivos</span></div>
+      <div><strong>{{ stats.pending or 0 }}</strong><span>por analizar</span></div>
+      <div><strong>{{ stats.errors or 0 }}</strong><span>errores</span></div>
+      <div><strong>{{ stats.reviewed or 0 }}</strong><span>revisados</span></div>
+      <div><strong>{{ stats.missing or 0 }}</strong><span>faltantes</span></div>
+    </section>
+
+    <section class="panel filters">
+      <form method="get" action="/">
+        <input name="q" value="{{ q }}" placeholder="Buscar por nombre o carpeta">
+        <select name="flag">
+          <option value="">Todos</option>
+          <option value="unanalyzed" {{ 'selected' if flag=='unanalyzed' else '' }}>Sin analizar / cambiados</option>
+          <option value="audio_es" {{ 'selected' if flag=='audio_es' else '' }}>Con espanol</option>
+          <option value="posible_castellano" {{ 'selected' if flag=='posible_castellano' else '' }}>Posible castellano Espana</option>
+          <option value="posible_latino" {{ 'selected' if flag=='posible_latino' else '' }}>Posible latino</option>
+          <option value="sin_espanol" {{ 'selected' if flag=='sin_espanol' else '' }}>Sin espanol detectado</option>
+          <option value="sin_audio" {{ 'selected' if flag=='sin_audio' else '' }}>Sin audio</option>
+          <option value="sin_video" {{ 'selected' if flag=='sin_video' else '' }}>Sin video</option>
+          <option value="dual_multi_audio" {{ 'selected' if flag=='dual_multi_audio' else '' }}>Dual / multi audio</option>
+          <option value="missing" {{ 'selected' if flag=='missing' else '' }}>Faltantes</option>
+          <option value="reviewed" {{ 'selected' if flag=='reviewed' else '' }}>Revisados</option>
+        </select>
+        <select name="category">
+          <option value="">Categoria</option>
+          <option value="infantil" {{ 'selected' if category=='infantil' else '' }}>Infantil</option>
+          <option value="adultos" {{ 'selected' if category=='adultos' else '' }}>Adultos</option>
+          <option value="revisar" {{ 'selected' if category=='revisar' else '' }}>Revisar</option>
+          <option value="borrar" {{ 'selected' if category=='borrar' else '' }}>Borrar</option>
+        </select>
+        <select name="root">
+          <option value="">Todas las raices</option>
+          {% for r in roots_seen %}
+            <option value="{{ r }}" {{ 'selected' if root==r else '' }}>{{ r }}</option>
+          {% endfor %}
+        </select>
+        <button class="btn secondary" type="submit">Filtrar</button>
+        <a class="btn ghost" href="/">Limpiar</a>
+      </form>
+    </section>
+
+    <section class="list">
+      {% if not items %}
+        <p class="empty">No hay archivos para mostrar. Configura una carpeta y pulsa Escanear cambios.</p>
+      {% endif %}
+      {% for item in items %}
+        <article class="row {{ 'missing' if item.missing else '' }}">
+          <div class="mainline">
+            <div>
+              <h3>{{ item.filename }}</h3>
+              <p class="path">{{ item.parent }}</p>
+            </div>
+            <div class="status">{{ item.status_label }}</div>
+          </div>
+
+          <div class="facts">
+            <span>{{ item.size_text }}</span>
+            <span>{{ item.video_text }}</span>
+            <span>{{ item.audio_summary or 'Audio sin analizar' }}</span>
+          </div>
+
+          {% if item.flags_list %}
+            <div class="flags">
+              {% for f in item.flags_list %}
+                <span class="flag {{ f }}">{{ f.replace('_', ' ') }}</span>
+              {% endfor %}
+            </div>
+          {% endif %}
+
+          {% if item.analysis_error %}<p class="error">{{ item.analysis_error }}</p>{% endif %}
+          {% if item.verify_status %}
+            <p class="{{ 'oktext' if item.verify_status=='ok' else 'error' }}">
+              Validacion completa: {{ item.verify_status }}{% if item.verify_error %} · {{ item.verify_error }}{% endif %}
+            </p>
+          {% endif %}
+
+          <div class="row-actions">
+            <a class="btn secondary" href="/open/{{ item.id }}">Abrir</a>
+            <a class="btn secondary" href="/folder/{{ item.id }}">Carpeta</a>
+            <form method="post" action="/analyze/{{ item.id }}">
+              <button class="btn secondary" {% if state.running or item.missing %}disabled{% endif %}>Analizar</button>
+            </form>
+            <form method="post" action="/verify/{{ item.id }}"
+                  onsubmit="return confirm('Esto lee el archivo completo desde el NAS y puede tardar. Se hace en este PC, uno por uno. Continuar?');">
+              <button class="btn danger" {% if state.running or item.missing or not ffmpeg_ok %}disabled{% endif %}>Validar completo</button>
+            </form>
+          </div>
+
+          <details>
+            <summary>Notas, categoria y movimiento seguro</summary>
+            <div class="details-grid">
+              <form method="post" action="/review/{{ item.id }}" class="review-form">
+                <label><input type="checkbox" name="reviewed" {{ 'checked' if item.reviewed else '' }}> Revisado</label>
+                <select name="category">
+                  <option value="">Sin categoria</option>
+                  <option value="infantil" {{ 'selected' if item.category=='infantil' else '' }}>Infantil</option>
+                  <option value="adultos" {{ 'selected' if item.category=='adultos' else '' }}>Adultos</option>
+                  <option value="revisar" {{ 'selected' if item.category=='revisar' else '' }}>Revisar</option>
+                  <option value="borrar" {{ 'selected' if item.category=='borrar' else '' }}>Borrar</option>
+                </select>
+                <input name="notes" value="{{ item.notes or '' }}" placeholder="Notas">
+                <button class="btn primary" type="submit">Guardar marca</button>
+              </form>
+              <form method="post" action="/move/{{ item.id }}" class="move-form"
+                    onsubmit="return confirm('Solo se intentara renombrar/mover sin copiar por red. Si parece otro volumen/share se bloquea. Continuar?');">
+                <input name="dest_dir" placeholder="Carpeta destino en el mismo share">
+                <button class="btn danger" type="submit" {% if item.missing %}disabled{% endif %}>Mover sin copiar</button>
+              </form>
+            </div>
+          </details>
+        </article>
+      {% endfor %}
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      var initial = document.getElementById("state");
+      if (!initial || initial.dataset.running !== "1") return;
+      var timer = setInterval(function () {
+        fetch("/api/status").then(function (r) { return r.json(); }).then(function (s) {
+          if (!s.running) {
+            clearInterval(timer);
+            location.reload();
+          }
+        }).catch(function () {});
+      }, 3000);
+    })();
+  </script>
+</body>
+</html>

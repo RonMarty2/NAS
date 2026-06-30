@@ -132,3 +132,42 @@ pip install -r requirements.txt
 export NAS_DOWNLOADS_DIR=/ruta/descargas NAS_MOVIES_DIR=/ruta/Películas
 uvicorn app.main:app --reload --port 8678
 ```
+
+---
+
+## Auditor de biblioteca desde el PC
+
+Ademas del organizador que corre en el NAS, este repo incluye una herramienta
+separada para revisar bibliotecas grandes usando la potencia del PC.
+
+No mueve ni analiza nada automaticamente. Se ejecuta localmente en Windows/PC y
+lee las carpetas del NAS por red, por ejemplo:
+
+```text
+\\RONNAS\video\peliculas
+Z:\video\series
+```
+
+Arranque:
+
+```powershell
+python run_pc_auditor.py
+```
+
+Abre:
+
+```text
+http://127.0.0.1:8787
+```
+
+Reglas para no saturar un DS218+:
+
+- **Escanear cambios** solo lee nombres, tamanos y fechas.
+- El analisis tecnico usa `ffprobe` en el PC y procesa un archivo a la vez.
+- Si un archivo no cambio, no se vuelve a analizar.
+- La validacion completa con `ffmpeg` es manual, lee el archivo entero y puede tardar.
+- **Mover sin copiar** solo intenta renombrar dentro del mismo volumen/share. Si parece
+  que tendria que copiar por red, se bloquea.
+
+Para ver audio, video, duracion, codecs e idiomas instala FFmpeg en el PC y asegurate
+de que `ffprobe` y `ffmpeg` queden disponibles en el `PATH`.
