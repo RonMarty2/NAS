@@ -8,8 +8,13 @@ def build_dest(item, base):
     return os.path.join(base, organizer.leaf_path(item))
 
 
-def inspect(item, base):
-    """Devuelve si el destino exacto o su carpeta ya existen."""
+def inspect(item, base, _folder_cache=None):
+    """Devuelve si el destino exacto o su carpeta ya existen.
+
+    `_folder_cache` (opcional) memoiza el listado de medios por carpeta durante un
+    mismo render: si varios items apuntan a la misma carpeta destino, se lista una
+    sola vez en vez de una por item (importa en carpetas grandes como peliculas/).
+    """
     dest = build_dest(item, base)
     folder = os.path.dirname(dest)
     exact_exists = os.path.exists(dest)
@@ -23,21 +28,12 @@ def inspect(item, base):
     safe_to_delete_pending = bool(exact_exists and exact_size_matches)
 
     if folder_exists:
-        try:
-            video_exts = config.ext_list("video_exts")
-            music_exts = config.ext_list("music_exts")
-            media_exts = video_exts | music_exts
-            for name in sorted(os.listdir(folder), key=str.lower):
-                path = os.path.join(folder, name)
-                if not os.path.isfile(path):
-                    continue
-                ext = os.path.splitext(name)[1].lower()
-                if ext in media_exts:
-                    existing_files.append(name)
-                if len(existing_files) >= 5:
-                    break
-        except OSError:
-            existing_files = []
+        if _folder_cache is not None and folder in _folder_cache:
+            existing_files = _folder_cache[folder]
+        else:
+            existing_files = _media_files_in(folder)
+            if _folder_cache is not None:
+                _folder_cache[folder] = existing_files
 
     return {
         "dest_path": dest,
@@ -56,8 +52,27 @@ def inspect(item, base):
     }
 
 
+def _media_files_in(folder):
+    """Hasta 5 nombres de archivos de medios en `folder` (orden alfabético)."""
+    try:
+        media_exts = config.ext_list("video_exts") | config.ext_list("music_exts")
+        found = []
+        for name in sorted(os.listdir(folder), key=str.lower):
+            path = os.path.join(folder, name)
+            if not os.path.isfile(path):
+                continue
+            if os.path.splitext(name)[1].lower() in media_exts:
+                found.append(name)
+            if len(found) >= 5:
+                break
+        return found
+    except OSError:
+        return []
+
+
 def inspect_many(items, base):
-    details = [inspect(item, base) for item in items]
+    cache = {}
+    details = [inspect(item, base, _folder_cache=cache) for item in items]
     exact = [d for d in details if d["exact_exists"]]
     folders = [d for d in details if d["has_media_in_folder"] and not d["exact_exists"]]
     unsafe = [d for d in exact if not d["safe_to_delete_pending"]]

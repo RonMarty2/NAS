@@ -130,6 +130,11 @@ CREATE TABLE IF NOT EXISTS items (
     processed_at   TEXT,
     UNIQUE(original_path)
 );
+
+-- Índices para que filtrar por estado/tipo no recorra toda la tabla. Importa
+-- conforme crece el historial (cientos/miles de filas) en NAS modestos.
+CREATE INDEX IF NOT EXISTS idx_items_status      ON items(status);
+CREATE INDEX IF NOT EXISTS idx_items_status_type ON items(status, media_type);
 """
 
 # Columnas añadidas después de la primera versión (migración para BD existentes).
@@ -233,6 +238,14 @@ def reset_processing():
     'Moviendo…' para siempre y que la página se recargue sin parar."""
     with _lock, get_conn() as conn:
         conn.execute("UPDATE items SET status='pending' WHERE status='processing'")
+
+
+def count_processing():
+    """Nº de items moviéndose ahora mismo (para saber si seguir sondeando)."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) AS c FROM items WHERE status='processing'"
+        ).fetchone()["c"]
 
 
 def pending_counts():

@@ -398,8 +398,7 @@ def scan_once():
 def _loop():
     while not _stop.is_set():
         try:
-            db.init_db()
-            scan_once()
+            scan_once()  # el esquema ya se crea una vez al arrancar (startup)
         except Exception:
             pass
         _stop.wait(POLL_INTERVAL)

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NAS Organizer</title>
-  {% if has_processing or dedup_running or delete_dup_running or scan_running or local_metadata_running %}<meta http-equiv="refresh" content="6">{% endif %}
+  <script>window.__ACTIVITY__ = {% if activity %}{active: {{ 'true' if activity.active else 'false' }}, sig: {{ activity.sig|tojson }}}{% else %}{active: false, sig: ""}{% endif %};</script>
   <link rel="stylesheet" href="/static/style.css">
   {# ---- PWA: instalable como app con icono propio ---- #}
   <link rel="manifest" href="/static/manifest.webmanifest">
@@ -86,6 +86,27 @@
     if ("serviceWorker" in navigator && window.isSecureContext) {
       navigator.serviceWorker.register("/sw.js").catch(function () {});
     }
+
+    // Sondeo ligero: en vez de recargar la página entera cada 6s mientras algo
+    // se mueve/escanea (caro en NAS modestos), preguntamos por un resumen JSON
+    // pequeño y solo recargamos UNA vez, cuando algo cambió de verdad (p.ej. el
+    // movimiento terminó). Si no hay nada en curso, ni siquiera sondeamos.
+    (function () {
+      var act = window.__ACTIVITY__ || { active: false, sig: "" };
+      if (!act.active) return;
+      var current = act.sig;
+      var POLL = 4000;
+      function tick() {
+        fetch("/api/status", { cache: "no-store" })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d.sig !== current) { location.reload(); return; }
+            if (d.active) setTimeout(tick, POLL);
+          })
+          .catch(function () { setTimeout(tick, POLL * 2); });
+      }
+      setTimeout(tick, POLL);
+    })();
 
     // Conserva la posición de scroll y los episodios abiertos al auto-recargarse
     // (cuando algo se está moviendo), para que la página no "salte".

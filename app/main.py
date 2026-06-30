@@ -187,7 +187,9 @@ def _file_meta_map(items):
 
 
 def _target_map(items, defaults):
-    return {it["id"]: targets.inspect(it, defaults[it["id"]]) for it in items}
+    cache = {}  # memoiza listados de carpeta para no re-listar la misma N veces
+    return {it["id"]: targets.inspect(it, defaults[it["id"]], _folder_cache=cache)
+            for it in items}
 
 
 def _dedup_state():
@@ -312,7 +314,41 @@ def _base_context():
         "scan_running": bool(scan_notice.get("running")),
         "local_metadata_notice": local_metadata_notice,
         "local_metadata_running": bool(local_metadata_notice.get("running")),
+        "activity": _activity(scan_notice, local_metadata_notice),
     }
+
+
+def _activity(scan_notice=None, local_metadata_notice=None):
+    """Resumen barato del estado para que la página sondee en vez de recargarse
+    entera cada pocos segundos. `active` indica si hay algo en curso (y por tanto
+    conviene seguir mirando); `sig` cambia solo cuando algo relevante cambió, de
+    modo que el navegador recarga una vez (al terminar) y no en cada tick."""
+    scan_notice = scan_notice if scan_notice is not None else _scan_notice()
+    local_notice = local_metadata_notice if local_metadata_notice is not None else _local_metadata_notice()
+    dedup = _dedup_notice()
+    delete_dup = _delete_dup_notice()
+    processing = db.count_processing()
+    counts = db.pending_counts()
+
+    active = bool(
+        processing
+        or dedup.get("running") or delete_dup.get("running")
+        or scan_notice.get("running") or local_notice.get("running")
+    )
+    sig = "|".join(str(x) for x in [
+        processing, sum(counts.values()),
+        dedup.get("running"), dedup.get("done"), dedup.get("deleted"), dedup.get("errors"),
+        delete_dup.get("running"), delete_dup.get("message"),
+        scan_notice.get("running"), scan_notice.get("message"),
+        local_notice.get("running"), local_notice.get("done"), local_notice.get("errors"),
+    ])
+    return {"active": active, "sig": sig}
+
+
+@app.get("/api/status")
+def api_status():
+    """Estado ligero para el sondeo del front (no renderiza HTML pesado)."""
+    return _activity()
 
 
 def _start_scan_job():
@@ -629,8 +665,9 @@ def tab(request: Request, media_type: str, dedup: int = 0):
             g["duplicate_groups"] = duplicates.comparison_groups(g["episodes"])
             g["target_exact_pending_ids"] = []
             g["target_unsafe_exact_count"] = 0
+            _folder_cache = {}
             for ep in g["episodes"]:
-                target = targets.inspect(ep, g["default_base"])
+                target = targets.inspect(ep, g["default_base"], _folder_cache=_folder_cache)
                 target_map[ep["id"]] = target
                 if ep["status"] == "pending" and target["exact_exists"]:
                     if target["safe_to_delete_pending"]:

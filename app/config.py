@@ -1,8 +1,39 @@
 """Configuración: combina variables de entorno (valores iniciales) con los ajustes
 guardados en la base de datos (editables desde la web). La BD siempre tiene prioridad."""
 import os
+import threading
+import time
 
 from . import db
+
+# Caché de los ajustes para no abrir una conexión SQLite en cada config.get().
+# Antes, pintar una pestaña o escanear la carpeta abría decenas/cientos de
+# conexiones (una por cada lectura de ajuste). Con una caché de pocos segundos
+# se hace una sola lectura por ventana y se nota mucho menos en hardware modesto.
+# Cualquier cambio desde la web invalida la caché al instante (ver set()).
+_CACHE_TTL = 3.0
+_cache = None
+_cache_at = 0.0
+_cache_lock = threading.Lock()
+
+
+def _settings():
+    global _cache, _cache_at
+    snapshot = _cache
+    if snapshot is not None and (time.monotonic() - _cache_at) < _CACHE_TTL:
+        return snapshot
+    with _cache_lock:
+        if _cache is not None and (time.monotonic() - _cache_at) < _CACHE_TTL:
+            return _cache
+        _cache = db.all_settings()
+        _cache_at = time.monotonic()
+        return _cache
+
+
+def invalidate():
+    """Olvida la caché para que la próxima lectura traiga valores frescos."""
+    global _cache
+    _cache = None
 
 # Claves de configuración y su variable de entorno por defecto.
 DEFAULTS = {
@@ -41,7 +72,7 @@ DEFAULTS = {
 
 def get(key):
     """Devuelve el valor efectivo: primero la BD, luego el valor por defecto/env."""
-    val = db.get_setting(key)
+    val = _settings().get(key)
     if val is None or val == "":
         return DEFAULTS.get(key, "")
     return val
@@ -49,6 +80,7 @@ def get(key):
 
 def set(key, value):
     db.set_setting(key, value)
+    invalidate()
 
 
 def as_dict():
