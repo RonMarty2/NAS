@@ -105,7 +105,9 @@ def _file_meta_map(items):
 
 
 def _target_map(items, defaults):
-    return {it["id"]: targets.inspect(it, defaults[it["id"]]) for it in items}
+    cache = {}  # memoiza listados de carpeta para no re-listar la misma N veces
+    return {it["id"]: targets.inspect(it, defaults[it["id"]], _folder_cache=cache)
+            for it in items}
 
 
 def _dedup_state():
@@ -519,8 +521,9 @@ def tab(request: Request, media_type: str, dedup: int = 0):
             g["target"] = targets.inspect_many(g["episodes"], g["default_base"])
             g["duplicate_groups"] = duplicates.comparison_groups(g["episodes"])
             g["target_exact_pending_ids"] = []
+            _folder_cache = {}
             for ep in g["episodes"]:
-                target = targets.inspect(ep, g["default_base"])
+                target = targets.inspect(ep, g["default_base"], _folder_cache=_folder_cache)
                 target_map[ep["id"]] = target
                 if ep["status"] == "pending" and target["exact_exists"]:
                     g["target_exact_pending_ids"].append(ep["id"])

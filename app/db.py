@@ -69,6 +69,11 @@ CREATE TABLE IF NOT EXISTS items (
     processed_at   TEXT,
     UNIQUE(original_path)
 );
+
+-- Índices para que filtrar por estado/tipo no recorra toda la tabla. Importa
+-- conforme crece el historial (cientos/miles de filas) en NAS modestos.
+CREATE INDEX IF NOT EXISTS idx_items_status      ON items(status);
+CREATE INDEX IF NOT EXISTS idx_items_status_type ON items(status, media_type);
 """
 
 # Columnas añadidas después de la primera versión (migración para BD existentes).
