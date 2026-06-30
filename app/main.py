@@ -40,6 +40,10 @@ LOCAL_METADATA_LOCK = threading.Lock()
 @app.on_event("startup")
 def _startup():
     db.init_db()
+    try:
+        organizer.cleanup_temp_copies(delete_all=True)
+    except Exception:
+        pass
     db.reset_processing()  # recupera movimientos que quedaron a medias
     try:
         watcher.reconcile_pending_moves()

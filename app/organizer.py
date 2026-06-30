@@ -2,6 +2,7 @@
 import os
 import re
 import shutil
+import time
 import uuid
 from xml.sax.saxutils import escape
 
@@ -13,6 +14,8 @@ from .metadata import tmdb
 
 # Caracteres no válidos en nombres de archivo/carpeta
 _INVALID = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_COPYING_TOKEN = ".copying-"
+_COPYING_SUFFIX = ".tmp"
 
 
 def safe_name(name):
@@ -108,6 +111,54 @@ def unique_path(path):
     return f"{base} ({n}){ext}"
 
 
+def cleanup_temp_copies(roots=None, max_age_seconds=6 * 60 * 60, delete_all=False):
+    """Borra temporales propios de copias interrumpidas.
+
+    Solo toca archivos ocultos creados por esta app con patrón:
+    `.Nombre.ext.copying-<uuid>.tmp`. En arranque se puede usar `delete_all`
+    porque no hay una copia activa del proceso anterior.
+    """
+    roots = roots or _library_roots()
+    now = time.time()
+    removed = 0
+    freed = 0
+    errors = 0
+
+    for root in roots:
+        if not root or not os.path.isdir(root):
+            continue
+        for dirpath, _dirs, files in os.walk(root):
+            for name in files:
+                if not _is_copy_temp_name(name):
+                    continue
+                path = os.path.join(dirpath, name)
+                try:
+                    age = now - os.path.getmtime(path)
+                    if not delete_all and age < max_age_seconds:
+                        continue
+                    size = os.path.getsize(path)
+                    os.remove(path)
+                    removed += 1
+                    freed += size
+                except OSError:
+                    errors += 1
+
+    return {"removed": removed, "freed_bytes": freed, "errors": errors}
+
+
+def _library_roots():
+    roots = {p.strip() for p in config.get("library_roots").split(",") if p.strip()}
+    for media_type in ("movie", "series", "music"):
+        default = default_base(media_type)
+        if default:
+            roots.add(default)
+    return sorted(roots)
+
+
+def _is_copy_temp_name(name):
+    return name.startswith(".") and _COPYING_TOKEN in name and name.endswith(_COPYING_SUFFIX)
+
+
 def _replace_or_move(src, dest):
     """Mueve `src` a `dest`; si `dest` ya existe, lo reemplaza.
 
@@ -129,7 +180,7 @@ def _replace_or_move(src, dest):
 def _copy_to_temp_then_replace(src, dest, replaced):
     tmp_dest = os.path.join(
         os.path.dirname(dest),
-        f".{os.path.basename(dest)}.copying-{uuid.uuid4().hex}.tmp",
+        f".{os.path.basename(dest)}{_COPYING_TOKEN}{uuid.uuid4().hex}{_COPYING_SUFFIX}",
     )
     expected_size = os.path.getsize(src)
     try:
