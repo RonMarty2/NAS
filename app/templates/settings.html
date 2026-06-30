@@ -86,7 +86,8 @@
   <h2>Limpiar duplicados (todo)</h2>
   <p class="meta">Busca en TODO lo pendiente (películas, series y música) archivos
     <strong>idénticos</strong> y borra los repetidos, conservando una copia legible de cada uno.
-    Verifica por SHA-256 antes de borrar; lo que no sea idéntico no se toca. Corre en segundo plano.</p>
+    Verifica por SHA-256 antes de borrar; lo que no sea idéntico no se toca. Lee los archivos completos,
+    así que en un NAS pequeño conviene usarlo cuando no estés copiando o viendo contenido.</p>
   {% if dedup_notice.visible %}
     <div class="dedup-banner {{ 'running' if dedup_notice.running else 'done' }}">
       <strong>{% if dedup_notice.running %}Limpieza global en curso{% else %}Limpieza global terminada{% endif %}</strong>
@@ -103,12 +104,12 @@
         <small class="dedup-error">Errores: {{ dedup_notice.errors }}{% if dedup_notice.last_error %} · {{ dedup_notice.last_error }}{% endif %}</small>
       {% endif %}
       {% if dedup_notice.running %}
-        <small>La app seguirá respondiendo mientras calcula el hash de los archivos.</small>
+        <small>Lee archivos completos para calcular SHA-256; puede tardar varios minutos en un DS218+.</small>
       {% endif %}
     </div>
   {% endif %}
   <form method="post" action="/dedup-all"
-        onsubmit="return confirmAndMarkDedup(this, 'Se calculará el SHA-256 de los archivos repetidos y se borrarán SOLO los idénticos, conservando uno de cada. ¿Continuar?');">
+        onsubmit="return confirmAndMarkDedup(this, 'Se leerán completos los archivos repetidos para calcular SHA-256. Puede tardar y poner lento el NAS. Se borrarán SOLO los idénticos, conservando uno de cada. ¿Continuar?');">
     <button class="btn btn-danger" type="submit" {% if dedup_notice.running %}disabled{% endif %}>🧹 Borrar duplicados idénticos de toda la biblioteca pendiente</button>
   </form>
 

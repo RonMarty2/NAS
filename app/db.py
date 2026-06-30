@@ -2,15 +2,73 @@
 import os
 import sqlite3
 import threading
+import time
 from contextlib import contextmanager
 
 DB_PATH = os.environ.get("NAS_DB_PATH", os.path.join(os.path.dirname(__file__), "..", "data", "nas.db"))
+DB_TIMEOUT_SECONDS = int(os.environ.get("NAS_DB_TIMEOUT_SECONDS", "60"))
+DB_BUSY_TIMEOUT_MS = int(os.environ.get("NAS_DB_BUSY_TIMEOUT_MS", str(DB_TIMEOUT_SECONDS * 1000)))
 
-_lock = threading.Lock()
+_lock = threading.RLock()
+_wal_lock = threading.Lock()
+_wal_configured = False
 
 
 def _ensure_dir():
     os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)), exist_ok=True)
+
+
+def is_locked_error(exc):
+    text = str(exc).lower()
+    return isinstance(exc, sqlite3.OperationalError) and (
+        "database is locked" in text or "database table is locked" in text
+    )
+
+
+def _retry_sqlite(fn, attempts=4):
+    delay = 0.25
+    for attempt in range(attempts):
+        try:
+            return fn()
+        except sqlite3.OperationalError as exc:
+            if not is_locked_error(exc) or attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 2.0)
+
+
+class _RetryingConnection:
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, *args, **kwargs):
+        return _retry_sqlite(lambda: self._conn.execute(*args, **kwargs))
+
+    def executemany(self, *args, **kwargs):
+        return _retry_sqlite(lambda: self._conn.executemany(*args, **kwargs))
+
+    def executescript(self, *args, **kwargs):
+        return _retry_sqlite(lambda: self._conn.executescript(*args, **kwargs))
+
+    def commit(self):
+        return _retry_sqlite(self._conn.commit)
+
+    def rollback(self):
+        return self._conn.rollback()
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+def _configure_wal(conn):
+    global _wal_configured
+    if _wal_configured:
+        return
+    with _wal_lock:
+        if _wal_configured:
+            return
+        conn.execute("PRAGMA journal_mode=WAL")
+        _wal_configured = True
 
 
 @contextmanager
@@ -21,14 +79,17 @@ def get_conn():
     así la web no se queda esperando. busy_timeout evita errores 'database locked'.
     """
     _ensure_dir()
-    conn = sqlite3.connect(DB_PATH, timeout=15)
+    conn = sqlite3.connect(DB_PATH, timeout=DB_TIMEOUT_SECONDS)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA busy_timeout=5000")
+    wrapped = _RetryingConnection(conn)
+    wrapped.execute(f"PRAGMA busy_timeout={DB_BUSY_TIMEOUT_MS}")
+    wrapped.execute("PRAGMA synchronous=NORMAL")
     try:
-        yield conn
-        conn.commit()
+        yield wrapped
+        wrapped.commit()
+    except Exception:
+        wrapped.rollback()
+        raise
     finally:
         conn.close()
 
@@ -88,7 +149,8 @@ _MIGRATIONS = {
 
 
 def init_db():
-    with get_conn() as conn:
+    with _lock, get_conn() as conn:
+        _configure_wal(conn)
         conn.executescript(SCHEMA)
         # Migración: añade columnas que falten en bases de datos antiguas.
         existing = {r["name"] for r in conn.execute("PRAGMA table_info(items)").fetchall()}
@@ -106,7 +168,7 @@ def get_setting(key, default=None):
 
 
 def set_setting(key, value):
-    with get_conn() as conn:
+    with _lock, get_conn() as conn:
         conn.execute(
             "INSERT INTO settings(key, value) VALUES(?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -142,7 +204,7 @@ def update_item(item_id, **fields):
         return
     cols = ", ".join(f"{k}=?" for k in fields)
     vals = list(fields.values()) + [item_id]
-    with get_conn() as conn:
+    with _lock, get_conn() as conn:
         conn.execute(f"UPDATE items SET {cols} WHERE id=?", vals)
 
 
@@ -161,7 +223,7 @@ def list_items(status=None, media_type=None):
 
 
 def delete_item(item_id):
-    with get_conn() as conn:
+    with _lock, get_conn() as conn:
         conn.execute("DELETE FROM items WHERE id=?", (item_id,))
 
 
@@ -169,7 +231,7 @@ def reset_processing():
     """Devuelve a 'pending' los items que quedaron 'processing' (p.ej. si el
     contenedor se reinició a mitad de un movimiento). Evita que se queden
     'Moviendo…' para siempre y que la página se recargue sin parar."""
-    with get_conn() as conn:
+    with _lock, get_conn() as conn:
         conn.execute("UPDATE items SET status='pending' WHERE status='processing'")
 
 
@@ -186,5 +248,5 @@ def pending_counts():
 def reset_match_attempts():
     """Reinicia el contador de intentos de TMDB para lo pendiente. Se llama al
     guardar ajustes (p.ej. al poner la API key) para que se vuelva a intentar."""
-    with get_conn() as conn:
+    with _lock, get_conn() as conn:
         conn.execute("UPDATE items SET match_attempts=0 WHERE status='pending'")

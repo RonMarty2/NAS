@@ -2,7 +2,7 @@
   <div class="dup-alert dup-alert-exact">
     <div>
       <strong>Duplicado idéntico verificado</strong>
-      <span>{{ dup.exact_count }} archivos con mismo destino, tamaño y SHA-256{% if dup.hash_short %} · {{ dup.hash_short }}{% endif %}</span>
+      <span>{{ dup.exact_count }} archivos con mismo destino, tamaño y SHA-256{% if dup.hash_short %} · {{ dup.hash_short }}{% endif %}. Si borras, la app vuelve a verificar leyendo los archivos completos.</span>
     </div>
     {% if delete_dup_notice.running and delete_dup_notice.item_id == item['id'] %}
       <p class="processing dup-working">🗑️ Verificando SHA-256 y borrando este duplicado… <small>si tarda, no está congelado.</small></p>
@@ -19,14 +19,14 @@
   <div class="dup-alert dup-alert-exact">
     <div>
       <strong>Mismo nombre final y mismo peso</strong>
-      <span>{{ dup.same_size_count }} archivos podrían ser idénticos. Al borrar se verificará SHA-256 completo y que quede otro archivo legible.</span>
+      <span>{{ dup.same_size_count }} archivos podrían ser idénticos. Verificar lee los archivos completos; en un NAS pequeño puede tardar varios minutos.</span>
     </div>
     {% if delete_dup_notice.running and delete_dup_notice.item_id == item['id'] %}
       <p class="processing dup-working">🗑️ Verificando SHA-256 y borrando este duplicado… <small>si tarda, no está congelado.</small></p>
     {% endif %}
     {% if item['status'] != 'processing' %}
       <form method="post" action="/item/{{ item['id'] }}/delete-duplicate"
-            onsubmit="return confirmAndMarkDelete(this, 'Se calculará SHA-256 completo antes de borrar. Si no es idéntico, no se borrará. ¿Continuar?');">
+            onsubmit="return confirmAndMarkDelete(this, 'Se leerán completos los archivos para calcular SHA-256. En un NAS pequeño puede tardar y ponerlo lento. Si no son idénticos, no se borrará nada. ¿Continuar?');">
         <button class="btn btn-danger btn-sm" type="submit" {% if delete_dup_notice.running %}disabled{% endif %}>Verificar y borrar</button>
       </form>
     {% endif %}

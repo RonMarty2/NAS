@@ -119,7 +119,13 @@ def ensure_hash(item, force=False):
         return stored_hash, size
 
     digest = _sha256(path)
-    db.update_item(item["id"], file_hash=digest, file_hash_size=size, size_bytes=size)
+    try:
+        db.update_item(item["id"], file_hash=digest, file_hash_size=size, size_bytes=size)
+    except Exception as exc:
+        if not db.is_locked_error(exc):
+            raise
+        # El hash ya fue calculado; si la BD está ocupada, seguimos con la
+        # verificación actual y lo cacheamos en otra ocasión.
     return digest, size
 
 

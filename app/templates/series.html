@@ -121,7 +121,7 @@
                   </div>
                 {% endif %}
                 <form method="post" action="/series/dedup" class="dedup-all"
-                      onsubmit="return confirmAndMarkDedup(this, 'Se calculará el SHA-256 de cada archivo y se borrarán SOLO los idénticos, conservando una copia legible de cada episodio. Los que no sean idénticos NO se tocan. ¿Continuar?');">
+                      onsubmit="return confirmAndMarkDedup(this, 'Se leerán completos los archivos para calcular SHA-256. Puede tardar y poner lento el NAS. Se borrarán SOLO los idénticos, conservando una copia legible de cada episodio. ¿Continuar?');">
                   {% for ep in g.episodes %}<input type="hidden" name="ids" value="{{ ep['id'] }}">{% endfor %}
                   <button class="btn btn-danger btn-sm" type="submit" {% if dedup_notice.running %}disabled{% endif %}>🧹 Borrar duplicados idénticos de esta serie (conservar uno de cada)</button>
                 </form>
@@ -145,7 +145,7 @@
                           {% if cand.error %}<p class="error">{{ cand.error }}</p>{% endif %}
                           {% if cand.status != 'processing' and dup.same_size_count > 1 %}
                             <form method="post" action="/item/{{ cand.id }}/delete-duplicate"
-                                  onsubmit="return confirmAndMarkDelete(this, 'Se calculará SHA-256 completo antes de borrar. Si no es idéntico, no se borrará. ¿Continuar?');">
+                                  onsubmit="return confirmAndMarkDelete(this, 'Se leerán completos los archivos para calcular SHA-256. Si no es idéntico, no se borrará. ¿Continuar?');">
                               <button class="btn btn-danger btn-sm" type="submit" {% if delete_dup_notice.running %}disabled{% endif %}>Verificar y borrar este</button>
                             </form>
                           {% endif %}
@@ -194,7 +194,7 @@
                       <form method="post" action="/item/{{ ep['id'] }}/skip"><button class="btn btn-ghost btn-sm">⏭️</button></form>
                       {% if dup.exact_count > 1 or dup.same_size_count > 1 %}
                         <form method="post" action="/item/{{ ep['id'] }}/delete-duplicate"
-                              onsubmit="return confirmAndMarkDelete(this, 'Se calculará SHA-256 completo antes de borrar. Si no es idéntico, no se borrará. ¿Continuar?');">
+                              onsubmit="return confirmAndMarkDelete(this, 'Se leerán completos los archivos para calcular SHA-256. Si no es idéntico, no se borrará. ¿Continuar?');">
                           <button class="btn btn-danger btn-sm" title="Verificar y borrar duplicado exacto" {% if delete_dup_notice.running %}disabled{% endif %}>🗑️</button></form>
                       {% elif target.exact_exists %}
                         <a class="btn btn-secondary btn-sm" href="/item/{{ ep['id'] }}/conflict">Comparar</a>
