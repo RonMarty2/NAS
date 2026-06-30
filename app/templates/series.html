@@ -70,7 +70,7 @@
               {% if g.target.exact_count %}
                 <div class="target-warning target-warning-strong">
                   <strong>Ya existe en destino</strong>
-                  <span>{{ g.target.exact_count }} episodio{{ 's' if g.target.exact_count != 1 else '' }} ya tiene{{ 'n' if g.target.exact_count != 1 else '' }} archivo final en la biblioteca.</span>
+                  <span>{{ g.target.exact_count }} episodio{{ 's' if g.target.exact_count != 1 else '' }} ya tiene{{ 'n' if g.target.exact_count != 1 else '' }} archivo final en la biblioteca. Se moveran solo los que no tengan conflicto; compara los otros uno por uno.</span>
                 </div>
                 {% if g.target_exact_pending_ids %}
                   <form method="post" action="/series/delete-existing"
@@ -90,7 +90,9 @@
             <form method="post" action="/series/confirm-all">
               {% for ep in g.episodes %}<input type="hidden" name="ids" value="{{ ep['id'] }}">{% endfor %}
               <input type="hidden" name="dest_folder" id="dest-{{ g.gid }}" value="{{ g.default_base }}">
-              <button class="btn btn-primary" type="submit">✅ Confirmar y mover los {{ g.count }}</button>
+              <button class="btn btn-primary" type="submit">
+                {% if g.target.exact_count %}Mover sin conflictos{% else %}✅ Confirmar y mover los {{ g.count }}{% endif %}
+              </button>
             </form>
           </div>
 
@@ -195,6 +197,7 @@
                               onsubmit="return confirmAndMarkDelete(this, 'Se calculará SHA-256 completo antes de borrar. Si no es idéntico, no se borrará. ¿Continuar?');">
                           <button class="btn btn-danger btn-sm" title="Verificar y borrar duplicado exacto" {% if delete_dup_notice.running %}disabled{% endif %}>🗑️</button></form>
                       {% elif target.exact_exists %}
+                        <a class="btn btn-secondary btn-sm" href="/item/{{ ep['id'] }}/conflict">Comparar</a>
                         <form method="post" action="/item/{{ ep['id'] }}/delete"
                               onsubmit="return confirm('Este archivo final ya existe en destino. Se borrara solo el pendiente de descargas. Continuar?');">
                           <button class="btn btn-danger btn-sm" title="Borrar pendiente de descargas">Borrar pendiente</button></form>

@@ -65,7 +65,9 @@
       {% include "target_notice.html" %}
       <form method="post" action="/item/{{ item['id'] }}/confirm">
         <input type="hidden" name="dest_folder" id="dest-{{ item['id'] }}" value="{{ base_def }}">
-        <button class="btn btn-primary" type="submit">✅ Confirmar y mover</button>
+        <button class="btn btn-primary" type="submit">
+          {% if target.exact_exists %}Comparar versiones{% else %}✅ Confirmar y mover{% endif %}
+        </button>
       </form>
     </div>
 
@@ -89,6 +91,7 @@
         <button class="btn btn-ghost" type="submit">⏭️ Omitir</button>
       </form>
       {% if target.exact_exists %}
+      <a class="btn btn-secondary" href="/item/{{ item['id'] }}/conflict">Comparar versiones</a>
       <form method="post" action="/item/{{ item['id'] }}/delete"
             onsubmit="return confirm('Este archivo final ya existe en destino. Se borrara solo el pendiente de descargas. Continuar?');">
         <button class="btn btn-danger" type="submit">Borrar pendiente</button>

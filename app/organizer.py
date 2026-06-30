@@ -2,6 +2,7 @@
 import os
 import re
 import shutil
+import uuid
 from xml.sax.saxutils import escape
 
 import requests
@@ -104,6 +105,42 @@ def unique_path(path):
     while os.path.exists(f"{base} ({n}){ext}"):
         n += 1
     return f"{base} ({n}){ext}"
+
+
+def _replace_or_move(src, dest):
+    """Mueve `src` a `dest`; si `dest` ya existe, lo reemplaza.
+
+    Cuando el origen y destino están en volúmenes distintos, copia primero a un
+    temporal en la carpeta destino y reemplaza al final, para no borrar el
+    archivo existente si la copia falla a medias.
+    """
+    if os.path.isdir(dest):
+        raise IsADirectoryError(f"El destino existe y es una carpeta: {dest}")
+
+    if not os.path.exists(dest):
+        shutil.move(src, dest)
+        return False
+
+    try:
+        os.replace(src, dest)
+        return True
+    except OSError:
+        tmp_dest = os.path.join(
+            os.path.dirname(dest),
+            f".{os.path.basename(dest)}.replacing-{uuid.uuid4().hex}.tmp",
+        )
+        try:
+            shutil.copy2(src, tmp_dest)
+            os.replace(tmp_dest, dest)
+            os.remove(src)
+            return True
+        except Exception:
+            try:
+                if os.path.exists(tmp_dest):
+                    os.remove(tmp_dest)
+            except OSError:
+                pass
+            raise
 
 
 def _g(item, key):
@@ -253,7 +290,7 @@ def write_metadata(item, dest):
         pass
 
 
-def move_item(item):
+def move_item(item, on_existing="error"):
     """Mueve el archivo (y subtítulos) a su destino. Devuelve (ok, dest_path, mensaje)."""
     src = item["original_path"]
     if not os.path.exists(src):
@@ -262,26 +299,41 @@ def move_item(item):
     dest = build_dest(item)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     if os.path.exists(dest):
-        return False, None, (
-            f"Ya existe en destino: {dest}. No se movio para evitar crear una copia (2)."
-        )
+        if on_existing == "keep_both":
+            dest = unique_path(dest)
+        elif on_existing != "replace":
+            return False, None, f"Ya existe en destino: {dest}. Compara versiones antes de decidir."
 
     try:
-        shutil.move(src, dest)
+        replaced = _replace_or_move(src, dest)
     except Exception as e:
         return False, None, f"Error al mover: {e}"
 
-    # Mover subtítulos asociados (solo vídeo), junto al vídeo y sin sobrescribir
+    # Mover subtítulos asociados (solo vídeo), junto al vídeo.
     if item["media_type"] in ("movie", "series"):
         dest_stem = os.path.splitext(dest)[0]
+        used_sub_targets = set()
         for sub in _find_subtitles(src):
             sub_ext = os.path.splitext(sub)[1]
+            sub_dest = dest_stem + sub_ext
+            if sub_dest in used_sub_targets:
+                sub_dest = unique_path(sub_dest)
             try:
-                shutil.move(sub, unique_path(dest_stem + sub_ext))
+                if on_existing == "replace":
+                    _replace_or_move(sub, sub_dest)
+                    used_sub_targets.add(sub_dest)
+                else:
+                    final_sub_dest = unique_path(sub_dest)
+                    shutil.move(sub, final_sub_dest)
+                    used_sub_targets.add(final_sub_dest)
             except Exception:
                 pass
 
     # Escribe .nfo + póster para que Jellyfin reconozca exacto (mejor esfuerzo).
     write_metadata(item, dest)
 
+    if replaced:
+        return True, dest, "Movido correctamente. Se reemplazo el archivo existente."
+    if on_existing == "keep_both":
+        return True, dest, "Movido correctamente. Se conservaron ambas versiones."
     return True, dest, "Movido correctamente."

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block content %}
+  <h1>Comparar versiones</h1>
+
+  <div class="conflict-head">
+    <div class="poster">
+      {% if item["poster_url"] %}
+        <img src="{{ item['poster_url'] }}" alt="poster">
+      {% else %}
+        <div class="poster-placeholder">Sin imagen</div>
+      {% endif %}
+    </div>
+    <div>
+      <h2>{{ item["chosen_title"] or item["detected_title"] or item["filename"] }}
+        {% if item["chosen_year"] %}({{ item["chosen_year"] }}){% endif %}</h2>
+      <p class="meta">Ya existe un archivo final con el mismo nombre. Elige que version conservar.</p>
+      <p class="preview">Destino exacto: <span>{{ target.dest_path }}</span></p>
+    </div>
+  </div>
+
+  <div class="compare-grid">
+    <section class="version-panel version-existing">
+      <h3>Existente en biblioteca</h3>
+      <div class="version-name" title="{{ existing.path }}">{{ existing.filename }}</div>
+      {% if existing.facts %}
+        <div class="file-facts">
+          {% for fact in existing.facts %}<span>{{ fact }}</span>{% endfor %}
+        </div>
+      {% else %}
+        <p class="empty">No se pudieron leer datos tecnicos.</p>
+      {% endif %}
+      {% if existing.modified %}<p class="meta">Modificado: {{ existing.modified }}</p>{% endif %}
+      <p class="path">{{ existing.path }}</p>
+    </section>
+
+    <section class="version-panel version-new">
+      <h3>Nuevo pendiente</h3>
+      <div class="version-name" title="{{ pending.path }}">{{ pending.filename }}</div>
+      {% if pending.facts %}
+        <div class="file-facts">
+          {% for fact in pending.facts %}<span>{{ fact }}</span>{% endfor %}
+        </div>
+      {% else %}
+        <p class="empty">No se pudieron leer datos tecnicos.</p>
+      {% endif %}
+      {% if pending.modified %}<p class="meta">Modificado: {{ pending.modified }}</p>{% endif %}
+      <p class="path">{{ pending.path }}</p>
+    </section>
+  </div>
+
+  <div class="decision-panel">
+    <form method="post" action="/item/{{ item['id'] }}/conflict/keep-existing"
+          onsubmit="return confirmAndMarkDelete(this, 'Se borrara el archivo nuevo de descargas y se conservara el que ya esta en la biblioteca. Continuar?');">
+      <button class="btn btn-danger" type="submit">Mantener existente y borrar pendiente</button>
+    </form>
+
+    <form method="post" action="/item/{{ item['id'] }}/conflict/replace"
+          onsubmit="return confirmAndMarkSubmit(this, 'Se reemplazara el archivo existente por el nuevo. Continuar?', 'Reemplazando...');">
+      <button class="btn btn-primary" type="submit">Reemplazar con el nuevo</button>
+    </form>
+
+    <form method="post" action="/item/{{ item['id'] }}/conflict/keep-both"
+          onsubmit="return confirmAndMarkSubmit(this, 'Se conservaran ambas versiones. El nuevo se guardara con un nombre unico tipo (2). Continuar?', 'Moviendo...');">
+      <button class="btn btn-secondary" type="submit">Mantener ambos</button>
+    </form>
+
+    <a class="btn btn-ghost" href="/tab/{{ item['media_type'] }}">Cancelar</a>
+  </div>
+{% endblock %}
