@@ -111,37 +111,62 @@ def unique_path(path):
 def _replace_or_move(src, dest):
     """Mueve `src` a `dest`; si `dest` ya existe, lo reemplaza.
 
-    Cuando el origen y destino están en volúmenes distintos, copia primero a un
-    temporal en la carpeta destino y reemplaza al final, para no borrar el
-    archivo existente si la copia falla a medias.
+    Si no se puede renombrar de forma atómica (por ejemplo, entre montajes),
+    copia a un temporal oculto en la carpeta destino y solo publica el archivo
+    final cuando la copia terminó y el tamaño coincide.
     """
     if os.path.isdir(dest):
         raise IsADirectoryError(f"El destino existe y es una carpeta: {dest}")
 
-    if not os.path.exists(dest):
-        shutil.move(src, dest)
-        return False
-
+    replaced = os.path.exists(dest)
     try:
         os.replace(src, dest)
-        return True
+        return replaced
     except OSError:
-        tmp_dest = os.path.join(
-            os.path.dirname(dest),
-            f".{os.path.basename(dest)}.replacing-{uuid.uuid4().hex}.tmp",
-        )
+        return _copy_to_temp_then_replace(src, dest, replaced)
+
+
+def _copy_to_temp_then_replace(src, dest, replaced):
+    tmp_dest = os.path.join(
+        os.path.dirname(dest),
+        f".{os.path.basename(dest)}.copying-{uuid.uuid4().hex}.tmp",
+    )
+    expected_size = os.path.getsize(src)
+    try:
+        with open(src, "rb") as in_f, open(tmp_dest, "wb") as out_f:
+            shutil.copyfileobj(in_f, out_f, length=1024 * 1024 * 16)
+            out_f.flush()
+            os.fsync(out_f.fileno())
+        actual_size = os.path.getsize(tmp_dest)
+        if actual_size != expected_size:
+            raise IOError(
+                f"Copia incompleta: {actual_size} bytes copiados de {expected_size}."
+            )
+        shutil.copystat(src, tmp_dest, follow_symlinks=True)
+        os.replace(tmp_dest, dest)
+        _fsync_parent(dest)
+        os.remove(src)
+        return replaced
+    except Exception:
         try:
-            shutil.copy2(src, tmp_dest)
-            os.replace(tmp_dest, dest)
-            os.remove(src)
-            return True
-        except Exception:
-            try:
-                if os.path.exists(tmp_dest):
-                    os.remove(tmp_dest)
-            except OSError:
-                pass
-            raise
+            if os.path.exists(tmp_dest):
+                os.remove(tmp_dest)
+        except OSError:
+            pass
+        raise
+
+
+def _fsync_parent(path):
+    try:
+        fd = os.open(os.path.dirname(path), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
 
 
 def _g(item, key):
@@ -342,7 +367,7 @@ def move_item(item, on_existing="error"):
                     used_sub_targets.add(sub_dest)
                 else:
                     final_sub_dest = unique_path(sub_dest)
-                    shutil.move(sub, final_sub_dest)
+                    _replace_or_move(sub, final_sub_dest)
                     used_sub_targets.add(final_sub_dest)
             except Exception:
                 pass

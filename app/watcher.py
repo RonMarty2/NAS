@@ -288,6 +288,15 @@ def reconcile_pending_moves():
                 continue
             dest = it["dest_path"] or _expected_dest(it)
             if dest and _path_exists(dest):
+                ok, message = _dest_size_ok(dest, it)
+                if not ok:
+                    db.update_item(
+                        it["id"],
+                        status="error",
+                        dest_path=dest,
+                        error=message,
+                    )
+                    continue
                 db.update_item(
                     it["id"],
                     status="done",
@@ -309,6 +318,42 @@ def _path_exists(path):
         return bool(path and os.path.exists(path))
     except (OSError, ValueError, TypeError):
         return False
+
+
+def _dest_size_ok(dest, item):
+    expected = _safe_int(item["size_bytes"])
+    if expected <= 0:
+        return True, ""
+    try:
+        actual = os.path.getsize(dest)
+    except OSError as exc:
+        return False, f"No se pudo revisar el destino tras reinicio: {exc}"
+    if actual == expected:
+        return True, ""
+    return False, (
+        "Movimiento incompleto detectado tras reinicio: "
+        f"el destino pesa {_format_bytes(actual)} y se esperaban {_format_bytes(expected)}. "
+        "Conserva cualquier copia original que todavia exista y vuelve a descargar si falta."
+    )
+
+
+def _safe_int(value):
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _format_bytes(value):
+    n = float(_safe_int(value))
+    units = ["B", "KB", "MB", "GB", "TB"]
+    for unit in units:
+        if n < 1024 or unit == units[-1]:
+            break
+        n /= 1024
+    if unit in ("B", "KB"):
+        return f"{int(n)} {unit}"
+    return f"{n:.1f} {unit}"
 
 
 def _expected_dest(item):
