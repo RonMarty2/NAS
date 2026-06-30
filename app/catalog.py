@@ -245,11 +245,14 @@ def import_folder(root, enrich_limit=80, progress=None):
     skipped = 0
     errors = 0
     enrich_limit = max(0, int(enrich_limit or 0))
+    # Precargamos lo ya catalogado en un dict (una consulta) en vez de una
+    # consulta por archivo. En bibliotecas grandes eso evita miles de queries.
+    existing_by_path = {row["path"]: row for row in db.list_catalog_files()}
     for path in _iter_video_files(root):
         scanned += 1
         try:
             stat = os.stat(path)
-            existing = db.get_catalog_file_by_path(path)
+            existing = existing_by_path.get(path)
             filename = os.path.basename(path)
             changed = not existing or existing["size_bytes"] != stat.st_size or existing["mtime_ns"] != stat.st_mtime_ns
             if existing and not changed and existing["tmdb_id"]:

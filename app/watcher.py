@@ -142,37 +142,46 @@ def backfill_tech():
         db.update_item(it["id"], quality=quality, langs=langs)
 
 
-def reenrich_pending():
-    """Vuelve a buscar metadatos para los pendientes de película/serie que aún no
-    tienen coincidencia en TMDB. Útil cuando se acaba de poner la API key: los que
-    ya estaban en la lista consiguen su póster/descripción sin tener que volver a
-    descargarlos. No toca los que ya tienen coincidencia ni los elegidos a mano."""
-    if not tmdb.configured():
-        return
+def refresh_pending_metadata():
+    """Una sola pasada sobre los pendientes que completa lo que falte: info de
+    archivo (peso/calidad/idioma), reintento de TMDB para pelis/series sin
+    coincidencia, y portada para música. Antes eran tres pasadas separadas (tres
+    consultas de toda la cola) cada 30s; ahora se recorre una vez."""
+    tmdb_ok = tmdb.configured()
     for it in db.list_items(status="pending"):
-        if it["media_type"] not in ("movie", "series"):
-            continue
-        if it["tmdb_id"]:
-            continue  # ya reconocido o elegido manualmente
-        # No reconsultar TMDB para siempre: tras 3 intentos fallidos lo dejamos.
-        # (Al guardar ajustes/poner la API key se reinicia el contador.)
-        if (it["match_attempts"] or 0) >= 3:
-            continue
-        query = it["chosen_title"] or it["detected_title"]
-        if not query:
-            continue
-        try:
-            match = tmdb.best_match(query, it["media_type"], it["detected_year"])
-        except Exception:
-            continue
-        if match:
-            db.update_item(
-                it["id"], tmdb_id=match["tmdb_id"], chosen_title=match["title"],
-                chosen_year=match["year"], poster_url=match["poster_url"],
-                overview=match["overview"],
-            )
-        else:
-            db.update_item(it["id"], match_attempts=(it["match_attempts"] or 0) + 1)
+        mt = it["media_type"]
+
+        # 1) Info de archivo (peso/calidad/idioma) si aún no la tiene.
+        if not it["media_info"]:
+            path = it["original_path"]
+            if path and os.path.exists(path):
+                try:
+                    size = os.path.getsize(path)
+                    info = filemeta.inspect_file(path, it["filename"], size, allow_probe=_probe_enabled())
+                    db.update_item(it["id"], size_bytes=size, media_info=filemeta.to_json(info))
+                except Exception:
+                    pass
+
+        # 2) Reintento de TMDB para pelis/series sin coincidencia (máx. 3 intentos).
+        if tmdb_ok and mt in ("movie", "series") and not it["tmdb_id"] and (it["match_attempts"] or 0) < 3:
+            query = it["chosen_title"] or it["detected_title"]
+            if query:
+                try:
+                    match = tmdb.best_match(query, mt, it["detected_year"])
+                except Exception:
+                    match = None
+                if match:
+                    db.update_item(
+                        it["id"], tmdb_id=match["tmdb_id"], chosen_title=match["title"],
+                        chosen_year=match["year"], poster_url=match["poster_url"],
+                        overview=match["overview"],
+                    )
+                else:
+                    db.update_item(it["id"], match_attempts=(it["match_attempts"] or 0) + 1)
+
+        # 3) Portada para música cuando falta (máx. 3 intentos).
+        elif mt == "music" and not it["poster_url"] and (it["cover_attempts"] or 0) < 3:
+            refresh_music_cover(it["id"])
 
 
 def reidentify(item_id, forced_type):
@@ -192,20 +201,6 @@ def reidentify(item_id, forced_type):
         db.update_item(item_id, error=str(e))
 
 
-def refresh_pending_file_info():
-    """Completa peso/calidad/idioma para pendientes creados antes de esta versión."""
-    for it in db.list_items(status="pending"):
-        if it["media_info"]:
-            continue
-        path = it["original_path"]
-        if not os.path.exists(path):
-            continue
-        try:
-            size = os.path.getsize(path)
-            info = filemeta.inspect_file(path, it["filename"], size, allow_probe=_probe_enabled())
-            db.update_item(it["id"], size_bytes=size, media_info=filemeta.to_json(info))
-        except Exception:
-            continue
 
 
 def refresh_music_cover(item_id):
@@ -231,16 +226,6 @@ def refresh_music_cover(item_id):
         return True
     db.update_item(item_id, cover_attempts=(item["cover_attempts"] or 0) + 1)
     return False
-
-
-def refresh_pending_music_covers():
-    """Completa la portada de canciones/albumes pendientes cuando falta."""
-    for it in db.list_items(status="pending", media_type="music"):
-        if it["poster_url"]:
-            continue
-        if (it["cover_attempts"] or 0) >= 3:
-            continue
-        refresh_music_cover(it["id"])
 
 
 def _meaningful_text(value):
@@ -384,10 +369,8 @@ def scan_once():
             if _process_file(os.path.join(dirpath, f)) is not None:
                 nuevos += 1
             seen += 1
-    # Reintenta metadatos de lo que quedó pendiente sin reconocer.
-    reenrich_pending()
-    refresh_pending_file_info()
-    refresh_pending_music_covers()
+    # Reintenta metadatos de lo que quedó pendiente sin reconocer (una sola pasada).
+    refresh_pending_metadata()
     # Avisa si llegaron descargas nuevas para revisar.
     if nuevos:
         plural = "s" if nuevos != 1 else ""
