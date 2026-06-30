@@ -179,3 +179,74 @@ def episode_metadata(tmdb_id, season_number, episode_number):
         "runtime": data.get("runtime"),
         "still_url": _image_url(data.get("still_path")),
     }
+
+
+def movie_details(tmdb_id):
+    """Detalle liviano de una pelicula para el catalogo visual."""
+    if not configured() or not tmdb_id:
+        return {}
+    params = {"api_key": _key(), "language": _lang()}
+    try:
+        r = requests.get(f"{BASE}/movie/{tmdb_id}", params=params, timeout=8)
+        r.raise_for_status()
+        data = r.json()
+    except requests.RequestException:
+        return {}
+    collection = data.get("belongs_to_collection") or {}
+    companies = data.get("production_companies") or []
+    date = data.get("release_date") or ""
+    return {
+        "tmdb_id": data.get("id"),
+        "title": data.get("title") or data.get("original_title") or "",
+        "year": int(date[:4]) if date[:4].isdigit() else None,
+        "release_date": date,
+        "poster_url": (IMG + data["poster_path"]) if data.get("poster_path") else None,
+        "overview": data.get("overview") or "",
+        "collection": {
+            "id": collection.get("id"),
+            "name": collection.get("name") or "",
+            "poster_url": (IMG + collection["poster_path"]) if collection.get("poster_path") else None,
+            "backdrop_url": _image_url(collection.get("backdrop_path")),
+        } if collection.get("id") else None,
+        "companies": [
+            {
+                "id": company.get("id"),
+                "name": company.get("name") or "",
+                "logo_url": (IMG + company["logo_path"]) if company.get("logo_path") else None,
+            }
+            for company in companies[:5]
+        ],
+    }
+
+
+def collection_details(collection_id):
+    """Partes de una saga/coleccion de TMDB para saber que falta."""
+    if not configured() or not collection_id:
+        return {}
+    params = {"api_key": _key(), "language": _lang()}
+    try:
+        r = requests.get(f"{BASE}/collection/{collection_id}", params=params, timeout=8)
+        r.raise_for_status()
+        data = r.json()
+    except requests.RequestException:
+        return {}
+    parts = []
+    for part in data.get("parts") or []:
+        date = part.get("release_date") or ""
+        parts.append({
+            "tmdb_id": part.get("id"),
+            "title": part.get("title") or part.get("original_title") or "",
+            "year": int(date[:4]) if date[:4].isdigit() else None,
+            "release_date": date,
+            "poster_url": (IMG + part["poster_path"]) if part.get("poster_path") else None,
+            "overview": part.get("overview") or "",
+        })
+    parts.sort(key=lambda p: (p.get("release_date") or "9999", p.get("title") or ""))
+    return {
+        "id": data.get("id"),
+        "name": data.get("name") or "",
+        "overview": data.get("overview") or "",
+        "poster_url": (IMG + data["poster_path"]) if data.get("poster_path") else None,
+        "backdrop_url": _image_url(data.get("backdrop_path")),
+        "parts": parts,
+    }

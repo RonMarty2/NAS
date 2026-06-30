@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="catalog-hero">
+    <div>
+      <h1>Catálogo</h1>
+      <p>Tu álbum de películas: sagas, faltantes y lo que ya tienes en la biblioteca.</p>
+    </div>
+    <div class="catalog-actions">
+      <form method="post" action="/catalog/import">
+        <input name="folder" list="catalog-roots" value="{{ suggested_roots[0] if suggested_roots else '' }}" placeholder="/volume1/video/peliculas">
+        <datalist id="catalog-roots">
+          {% for root in suggested_roots %}
+            <option value="{{ root }}">
+          {% endfor %}
+        </datalist>
+        <input type="number" name="limit" value="80" min="0" max="300" title="Cuántas películas reconocer con TMDB en esta tanda">
+        <button class="btn btn-primary" type="submit" {% if catalog_running %}disabled{% endif %}>Importar biblioteca actual</button>
+      </form>
+      <form method="post" action="/catalog/update">
+        <input type="number" name="limit" value="80" min="1" max="300">
+        <button class="btn btn-secondary" type="submit" {% if catalog_running %}disabled{% endif %}>Actualizar sagas</button>
+      </form>
+    </div>
+  </section>
+
+  {% if not catalog.tmdb_configured %}
+    <div class="target-warning target-warning-strong">
+      <strong>Falta TMDB</strong>
+      <span>Configura la API key de TMDB en Ajustes para que el catálogo pueda reconocer sagas y faltantes.</span>
+    </div>
+  {% endif %}
+
+  <section class="catalog-stats">
+    <div><strong>{{ catalog.owned_total }}</strong><span>películas reconocidas</span></div>
+    <div><strong>{{ catalog.imported_total }}</strong><span>importadas desde biblioteca</span></div>
+    <div><strong>{{ catalog.collections|length }}</strong><span>sagas</span></div>
+    <div><strong>{{ catalog.uncached }}</strong><span>sin datos de saga</span></div>
+  </section>
+
+  {% if catalog.companies %}
+    <section class="catalog-strip">
+      <h2>Compañías en tu colección</h2>
+      <div class="company-list">
+        {% for company in catalog.companies %}
+          <div class="company-pill">
+            {% if company.logo_url %}<img src="{{ company.logo_url }}" alt="">{% endif %}
+            <span>{{ company.name }}</span>
+            <small>{{ company.count }}</small>
+          </div>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+
+  <section class="catalog-grid">
+    {% for saga in catalog.collections %}
+      <article class="saga-card">
+        <div class="saga-poster">
+          {% if saga.poster_url %}
+            <img src="{{ saga.poster_url }}" alt="">
+          {% else %}
+            <div class="poster-placeholder">Sin imagen</div>
+          {% endif %}
+        </div>
+        <div class="saga-body">
+          <div class="saga-head">
+            <div>
+              <h2>{{ saga.name }}</h2>
+              <p>{{ saga.owned_count }} de {{ saga.total_count }} en tu biblioteca</p>
+            </div>
+            {% if saga.missing_count %}
+              <span class="catalog-badge missing">Faltan {{ saga.missing_count }}</span>
+            {% else %}
+              <span class="catalog-badge complete">Completa</span>
+            {% endif %}
+          </div>
+          <div class="completion"><span style="width: {{ (saga.owned_count / saga.total_count * 100) if saga.total_count else 0 }}%"></span></div>
+          <div class="parts">
+            {% for part in saga.parts %}
+              <div class="part {{ 'owned' if part.owned else 'missing' }}">
+                <div class="part-poster">
+                  {% if part.poster_url %}<img src="{{ part.poster_url }}" alt="">{% else %}<div></div>{% endif %}
+                </div>
+                <div>
+                  <strong>{{ loop.index }}. {{ part.title }}</strong>
+                  <small>{% if part.release_date %}{{ part.release_date }}{% elif part.year %}{{ part.year }}{% else %}Sin fecha{% endif %}</small>
+                  {% if part.owned %}
+                    <span class="part-owned">La tienes{% if part.langs %} · {{ part.langs }}{% endif %}{% if part.quality %} · {{ part.quality }}{% endif %}</span>
+                  {% else %}
+                    <span class="part-missing">Falta</span>
+                  {% endif %}
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      </article>
+    {% endfor %}
+  </section>
+
+  {% if catalog.standalone %}
+    <section class="catalog-strip">
+      <h2>Películas sin saga detectada</h2>
+      <div class="standalone-list">
+        {% for movie in catalog.standalone %}
+          <article class="mini-movie">
+            {% if movie.poster_url %}<img src="{{ movie.poster_url }}" alt="">{% else %}<div class="poster-placeholder">Sin imagen</div>{% endif %}
+            <strong>{{ movie.title }}</strong>
+            <small>{{ movie.year or "" }}</small>
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+
+  {% if catalog.series %}
+    <section class="catalog-strip">
+      <h2>Series importadas</h2>
+      <div class="standalone-list">
+        {% for show in catalog.series %}
+          <article class="mini-movie">
+            {% if show.poster_url %}<img src="{{ show.poster_url }}" alt="">{% else %}<div class="poster-placeholder">Serie</div>{% endif %}
+            <strong>{{ show.title }}</strong>
+            <small>{% if show.year %}{{ show.year }}{% endif %}{% if show.langs %} · {{ show.langs }}{% endif %}</small>
+          </article>
+        {% endfor %}
+      </div>
+    </section>
+  {% endif %}
+
+  {% if not catalog.collections and not catalog.standalone and not catalog.series %}
+    <p class="empty">Todavía no hay catálogo. Pulsa <strong>Importar biblioteca actual</strong> para leer lo que ya tienes en el NAS.</p>
+  {% endif %}
+{% endblock %}

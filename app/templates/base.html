@@ -22,6 +22,7 @@
       {% for key, label in tabs %}
         <a class="tab {{ 'active' if active == key else '' }}" href="/tab/{{ key }}">{{ label }}{% if tab_counts and tab_counts.get(key) %} <span class="tab-count">{{ tab_counts.get(key) }}</span>{% endif %}</a>
       {% endfor %}
+      <a class="tab {{ 'active' if active == 'catalog' else '' }}" href="/catalog">Catálogo</a>
       <a class="tab {{ 'active' if active == 'history' else '' }}" href="/history">Historial</a>
       <a class="tab {{ 'active' if active == 'settings' else '' }}" href="/settings">Ajustes</a>
     </nav>
@@ -57,6 +58,17 @@
         {% if local_metadata_notice.current %}
           <small>{{ local_metadata_notice.current }}</small>
         {% endif %}
+      </div>
+    {% endif %}
+    {% if catalog_notice and catalog_notice.visible %}
+      <div class="scan-banner {{ 'running' if catalog_notice.running else 'done' }}">
+        <strong>{% if catalog_notice.running %}Actualizando catalogo{% else %}Catalogo{% endif %}</strong>
+        <span>{{ catalog_notice.message }}</span>
+        {% if catalog_notice.total %}
+          <progress class="dedup-progress" value="{{ catalog_notice.done or 0 }}" max="{{ catalog_notice.total }}"></progress>
+          <small>Avance: {{ catalog_notice.done or 0 }}/{{ catalog_notice.total }}</small>
+        {% endif %}
+        {% if catalog_notice.current %}<small>{{ catalog_notice.current }}</small>{% endif %}
       </div>
     {% endif %}
     {% block content %}{% endblock %}

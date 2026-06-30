@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import config, db, duplicates, filemeta, folders, jellyfin, organizer, targets, watcher
+from . import catalog, config, db, duplicates, filemeta, folders, jellyfin, organizer, targets, watcher
 from .metadata import music as music_meta
 from .metadata import tmdb
 
@@ -37,6 +37,7 @@ SCAN_STATUS_KEY = "scan_status"
 SCAN_LOCK = threading.Lock()
 LOCAL_METADATA_STATUS_KEY = "local_metadata_status"
 LOCAL_METADATA_LOCK = threading.Lock()
+CATALOG_LOCK = threading.Lock()
 IO_LOCK = threading.Lock()
 MOVE_QUEUE = queue.Queue()
 MOVE_LOCK = threading.Lock()
@@ -309,22 +310,26 @@ def _recover_scan_state():
 def _base_context():
     scan_notice = _scan_notice()
     local_metadata_notice = _local_metadata_notice()
+    catalog_notice = catalog.status()
     return {
         "scan_notice": scan_notice,
         "scan_running": bool(scan_notice.get("running")),
         "local_metadata_notice": local_metadata_notice,
         "local_metadata_running": bool(local_metadata_notice.get("running")),
-        "activity": _activity(scan_notice, local_metadata_notice),
+        "catalog_notice": catalog_notice,
+        "catalog_running": bool(catalog_notice.get("running")),
+        "activity": _activity(scan_notice, local_metadata_notice, catalog_notice),
     }
 
 
-def _activity(scan_notice=None, local_metadata_notice=None):
+def _activity(scan_notice=None, local_metadata_notice=None, catalog_notice=None):
     """Resumen barato del estado para que la página sondee en vez de recargarse
     entera cada pocos segundos. `active` indica si hay algo en curso (y por tanto
     conviene seguir mirando); `sig` cambia solo cuando algo relevante cambió, de
     modo que el navegador recarga una vez (al terminar) y no en cada tick."""
     scan_notice = scan_notice if scan_notice is not None else _scan_notice()
     local_notice = local_metadata_notice if local_metadata_notice is not None else _local_metadata_notice()
+    catalog_notice = catalog_notice if catalog_notice is not None else catalog.status()
     dedup = _dedup_notice()
     delete_dup = _delete_dup_notice()
     processing = db.count_processing()
@@ -334,6 +339,7 @@ def _activity(scan_notice=None, local_metadata_notice=None):
         processing
         or dedup.get("running") or delete_dup.get("running")
         or scan_notice.get("running") or local_notice.get("running")
+        or catalog_notice.get("running")
     )
     sig = "|".join(str(x) for x in [
         processing, sum(counts.values()),
@@ -341,6 +347,7 @@ def _activity(scan_notice=None, local_metadata_notice=None):
         delete_dup.get("running"), delete_dup.get("message"),
         scan_notice.get("running"), scan_notice.get("message"),
         local_notice.get("running"), local_notice.get("done"), local_notice.get("errors"),
+        catalog_notice.get("running"), catalog_notice.get("done"), catalog_notice.get("message"),
     ])
     return {"active": active, "sig": sig}
 
@@ -761,6 +768,133 @@ def _target_check_html(summary):
             + '</span></div>'
         )
     return ""
+
+
+@app.get("/catalog", response_class=HTMLResponse)
+def catalog_page(request: Request):
+    dedup_notice = _dedup_notice()
+    delete_dup_notice = _delete_dup_notice()
+    return templates.TemplateResponse(request, "catalog.html", {
+        "request": request,
+        "tabs": TABS,
+        "active": "catalog",
+        "page": "catalog",
+        "tab_counts": db.pending_counts(),
+        **_base_context(),
+        "catalog": catalog.build_catalog(),
+        "suggested_roots": catalog.suggested_roots(),
+        "dedup_running": bool(dedup_notice.get("running")),
+        "delete_dup_running": bool(delete_dup_notice.get("running")),
+    })
+
+
+@app.post("/catalog/import")
+def catalog_import(folder: str = Form(""), limit: int = Form(80)):
+    started = _start_catalog_import(folder, limit)
+    if not started:
+        catalog.set_status({
+            "running": False,
+            "message": "Ya hay una actualizacion de catalogo en curso.",
+        })
+    return RedirectResponse("/catalog", status_code=303)
+
+
+@app.post("/catalog/update")
+def catalog_update(limit: int = Form(80)):
+    started = _start_catalog_update(limit)
+    if not started:
+        catalog.set_status({
+            "running": False,
+            "message": "Ya hay una actualizacion de catalogo en curso.",
+        })
+    return RedirectResponse("/catalog", status_code=303)
+
+
+def _start_catalog_import(folder, limit):
+    if not CATALOG_LOCK.acquire(blocking=False):
+        return False
+    folder = (folder or "").strip()
+    limit = max(0, min(int(limit or 80), 300))
+    catalog.set_status({
+        "running": True,
+        "message": "Importando biblioteca actual...",
+        "done": 0,
+        "total": 0,
+        "current": folder,
+    })
+
+    def worker():
+        try:
+            def push(update):
+                catalog.set_status({
+                    "running": True,
+                    "message": update.get("message") or "Importando biblioteca actual...",
+                    "done": update.get("done", 0),
+                    "total": update.get("total", 0),
+                    "current": update.get("current", ""),
+                })
+
+            result = catalog.import_folder(folder, enrich_limit=limit, progress=push)
+            catalog.set_status({
+                "running": False,
+                "message": result.get("message", "Importacion terminada."),
+                "done": result.get("scanned", 0),
+                "total": result.get("scanned", 0),
+                "current": "",
+            })
+        except Exception as exc:
+            catalog.set_status({
+                "running": False,
+                "message": f"No se pudo importar la biblioteca: {exc}",
+            })
+        finally:
+            CATALOG_LOCK.release()
+
+    threading.Thread(target=worker, daemon=True).start()
+    return True
+
+
+def _start_catalog_update(limit):
+    if not CATALOG_LOCK.acquire(blocking=False):
+        return False
+    limit = max(1, min(int(limit or 80), 300))
+    catalog.set_status({
+        "running": True,
+        "message": "Actualizando sagas y faltantes...",
+        "done": 0,
+        "total": 0,
+        "current": "",
+    })
+
+    def worker():
+        try:
+            def push(update):
+                catalog.set_status({
+                    "running": True,
+                    "message": "Actualizando sagas y faltantes...",
+                    "done": update.get("done", 0),
+                    "total": update.get("total", 0),
+                    "current": update.get("current", ""),
+                })
+
+            result = catalog.update_catalog(limit=limit, progress=push)
+            catalog.set_status({
+                "running": False,
+                "message": result.get("message", "Catalogo actualizado."),
+                "done": result.get("done", 0),
+                "total": result.get("total", 0),
+                "current": "",
+            })
+        except Exception as exc:
+            catalog.set_status({
+                "running": False,
+                "message": f"No se pudo actualizar el catalogo: {exc}",
+            })
+        finally:
+            CATALOG_LOCK.release()
+
+    threading.Thread(target=worker, daemon=True).start()
+    return True
 
 
 @app.get("/history", response_class=HTMLResponse)

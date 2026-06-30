@@ -135,6 +135,34 @@ CREATE TABLE IF NOT EXISTS items (
 -- conforme crece el historial (cientos/miles de filas) en NAS modestos.
 CREATE INDEX IF NOT EXISTS idx_items_status      ON items(status);
 CREATE INDEX IF NOT EXISTS idx_items_status_type ON items(status, media_type);
+
+CREATE TABLE IF NOT EXISTS catalog_cache (
+    cache_key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at REAL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS catalog_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path TEXT NOT NULL UNIQUE,
+    filename TEXT NOT NULL,
+    size_bytes INTEGER DEFAULT 0,
+    mtime_ns INTEGER DEFAULT 0,
+    media_type TEXT DEFAULT 'movie',
+    tmdb_id INTEGER,
+    title TEXT,
+    year INTEGER,
+    poster_url TEXT,
+    overview TEXT,
+    quality TEXT,
+    langs TEXT,
+    last_seen REAL DEFAULT 0,
+    missing INTEGER DEFAULT 0,
+    source TEXT DEFAULT 'scan'
+);
+
+CREATE INDEX IF NOT EXISTS idx_catalog_files_tmdb ON catalog_files(tmdb_id);
+CREATE INDEX IF NOT EXISTS idx_catalog_files_missing ON catalog_files(missing);
 """
 
 # Columnas añadidas después de la primera versión (migración para BD existentes).
@@ -162,6 +190,17 @@ def init_db():
         for col, coltype in _MIGRATIONS.items():
             if col not in existing:
                 conn.execute(f"ALTER TABLE items ADD COLUMN {col} {coltype}")
+        existing_catalog = {r["name"] for r in conn.execute("PRAGMA table_info(catalog_files)").fetchall()}
+        catalog_migrations = {
+            "quality": "TEXT",
+            "langs": "TEXT",
+            "last_seen": "REAL DEFAULT 0",
+            "missing": "INTEGER DEFAULT 0",
+            "source": "TEXT DEFAULT 'scan'",
+        }
+        for col, coltype in catalog_migrations.items():
+            if col not in existing_catalog:
+                conn.execute(f"ALTER TABLE catalog_files ADD COLUMN {col} {coltype}")
 
 
 # ---------------- Ajustes (settings) ----------------
@@ -185,6 +224,73 @@ def all_settings():
     with get_conn() as conn:
         rows = conn.execute("SELECT key, value FROM settings").fetchall()
         return {r["key"]: r["value"] for r in rows}
+
+
+# ---------------- Cache del catalogo ----------------
+
+def get_catalog_cache(cache_key):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT value, updated_at FROM catalog_cache WHERE cache_key=?",
+            (cache_key,),
+        ).fetchone()
+        return row
+
+
+def set_catalog_cache(cache_key, value, updated_at=None):
+    if updated_at is None:
+        updated_at = time.time()
+    with _lock, get_conn() as conn:
+        conn.execute(
+            "INSERT INTO catalog_cache(cache_key,value,updated_at) VALUES(?,?,?) "
+            "ON CONFLICT(cache_key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+            (cache_key, value, updated_at),
+        )
+
+
+def upsert_catalog_file(path, filename, size_bytes=0, mtime_ns=0, **fields):
+    allowed = {
+        "media_type", "tmdb_id", "title", "year", "poster_url", "overview",
+        "quality", "langs", "last_seen", "missing", "source",
+    }
+    data = {k: v for k, v in fields.items() if k in allowed}
+    data.setdefault("last_seen", time.time())
+    data.setdefault("missing", 0)
+    data.setdefault("source", "scan")
+    cols = ["path", "filename", "size_bytes", "mtime_ns"] + list(data.keys())
+    vals = [path, filename, size_bytes, mtime_ns] + list(data.values())
+    updates = ", ".join(f"{col}=excluded.{col}" for col in cols if col != "path")
+    placeholders = ",".join("?" for _ in cols)
+    with _lock, get_conn() as conn:
+        conn.execute(
+            f"INSERT INTO catalog_files({','.join(cols)}) VALUES({placeholders}) "
+            f"ON CONFLICT(path) DO UPDATE SET {updates}",
+            vals,
+        )
+
+
+def get_catalog_file_by_path(path):
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM catalog_files WHERE path=?", (path,)).fetchone()
+
+
+def list_catalog_files(missing=None):
+    q = "SELECT * FROM catalog_files WHERE 1=1"
+    args = []
+    if missing is not None:
+        q += " AND missing=?"
+        args.append(1 if missing else 0)
+    q += " ORDER BY title COLLATE NOCASE, year"
+    with get_conn() as conn:
+        return conn.execute(q, args).fetchall()
+
+
+def mark_catalog_missing_before(scan_ts):
+    with _lock, get_conn() as conn:
+        conn.execute(
+            "UPDATE catalog_files SET missing=1 WHERE source='scan' AND last_seen<?",
+            (scan_ts,),
+        )
 
 
 # ---------------- Items (cola y historial) ----------------
