@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS items (
 -- conforme crece el historial (cientos/miles de filas) en NAS modestos.
 CREATE INDEX IF NOT EXISTS idx_items_status      ON items(status);
 CREATE INDEX IF NOT EXISTS idx_items_status_type ON items(status, media_type);
+CREATE INDEX IF NOT EXISTS idx_items_processed_at ON items(status, processed_at DESC);
 
 CREATE TABLE IF NOT EXISTS catalog_cache (
     cache_key TEXT PRIMARY KEY,
@@ -431,6 +432,20 @@ def list_items(status=None, media_type=None):
     q += " ORDER BY created_at DESC, id DESC"
     with get_conn() as conn:
         return conn.execute(q, args).fetchall()
+
+
+def list_recent_done(limit=15):
+    """Últimos items movidos, para 'Agregado recientemente' del dashboard.
+
+    Usa LIMIT en SQL (con el índice de processed_at) en vez de traer todo el
+    historial a memoria y ordenar en Python: importa en NAS modestos conforme
+    crece el historial."""
+    with get_conn() as conn:
+        return conn.execute(
+            "SELECT * FROM items WHERE status='done' AND processed_at IS NOT NULL "
+            "ORDER BY processed_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
 
 
 def delete_item(item_id):

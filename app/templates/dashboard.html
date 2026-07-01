@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="album-page">
+    <section class="album-hero">
+      <div class="album-title">
+        <span class="album-kicker">Resumen</span>
+        <h1>Tu biblioteca</h1>
+        <p>De un vistazo: cuánto tienes, cuánto espacio queda y lo último que agregaste.</p>
+      </div>
+    </section>
+
+    <section class="album-stats" aria-label="Resumen general">
+      <div><strong>{{ dash.counts.movies }}</strong><span>películas</span></div>
+      <div><strong>{{ dash.counts.series }}</strong><span>series</span></div>
+      <div><strong>{{ dash.counts.music }}</strong><span>canciones</span></div>
+      <div><strong>{{ dash.counts.pending }}</strong><span>pendientes por revisar</span></div>
+    </section>
+
+    {% if dash.disks %}
+      <section class="album-section">
+        <div class="album-section-head">
+          <h2>Espacio en disco</h2>
+        </div>
+        <div class="disk-grid">
+          {% for disk in dash.disks %}
+            <div class="disk-card">
+              <div class="disk-card-head">
+                <strong>{{ disk.paths|join(", ") }}</strong>
+                <span>{{ disk.pct_used }}% usado</span>
+              </div>
+              <div class="disk-bar"><span style="width: {{ disk.pct_used }}%" class="{{ 'warn' if disk.pct_used >= 90 else '' }}"></span></div>
+              <small>{{ disk.used_h }} usados de {{ disk.total_h }} · {{ disk.free_h }} libres</small>
+            </div>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    <section class="album-section">
+      <div class="album-section-head">
+        <h2>Accesos rápidos</h2>
+      </div>
+      <div class="dash-links">
+        <a class="btn btn-secondary" href="/catalog">🎬 Catálogo</a>
+        <a class="btn btn-secondary" href="/wishlist">💌 Lista de deseos</a>
+        <a class="btn btn-secondary" href="/health">🩺 Salud de la biblioteca</a>
+        <a class="btn btn-secondary" href="/tab/movie">📥 Pendientes por revisar</a>
+      </div>
+    </section>
+
+    {% if dash.recent %}
+      <section class="album-section">
+        <div class="album-section-head">
+          <h2>Agregado recientemente</h2>
+        </div>
+        <div class="album-movie-grid">
+          {% for item in dash.recent %}
+            <article class="album-movie">
+              <div class="album-movie-poster">
+                {% if item.poster_url %}<img src="{{ item.poster_url }}" alt="" loading="lazy">{% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
+              </div>
+              <strong>{{ item.title }}</strong>
+              <small>{{ item.year or "" }}</small>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+  </div>
+{% endblock %}

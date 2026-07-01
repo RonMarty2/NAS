@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import catalog, config, db, duplicates, filemeta, folders, health, jellyfin, organizer, targets, watcher, wishlist
+from . import catalog, config, dashboard, db, duplicates, filemeta, folders, health, jellyfin, organizer, targets, watcher, wishlist
 from .metadata import music as music_meta
 from .metadata import tmdb
 
@@ -119,8 +119,16 @@ def _maybe_reconcile_pending_moves():
 # ---------------- Vistas principales ----------------
 
 @app.get("/", response_class=HTMLResponse)
-def index():
-    return RedirectResponse("/tab/movie")
+def index(request: Request):
+    return templates.TemplateResponse(request, "dashboard.html", {
+        "request": request,
+        "tabs": TABS,
+        "active": "dashboard",
+        "page": "dashboard",
+        "tab_counts": db.pending_counts(),
+        **_base_context(),
+        "dash": dashboard.build(),
+    })
 
 
 # Service worker en la raíz (necesario para que la PWA tenga ámbito "/").
