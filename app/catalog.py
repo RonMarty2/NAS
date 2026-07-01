@@ -471,12 +471,18 @@ def build_by_folder(catalog_rows=None):
         g = groups.setdefault(root, {"root": root, "name": os.path.basename(root.rstrip("/\\")) or root, "items": []})
 
         if row["media_type"] == "series":
-            key = (root, _int(row["tmdb_id"]) or (row["title"] or row["filename"]).lower())
+            # Para agrupar sin tmdb_id, la carpeta que contiene el episodio es
+            # mucho más confiable que el título adivinado del nombre del
+            # archivo (que puede variar de un episodio a otro con nombres
+            # desordenados, p.ej. "S01E02" solo). Casi siempre todos los
+            # episodios de una serie viven en la misma carpeta.
+            folder_key = os.path.basename(os.path.dirname(row["path"]).rstrip("/\\"))
+            key = (root, _int(row["tmdb_id"]) or folder_key.lower() or (row["title"] or row["filename"]).lower())
             card = series_by_group.get(key)
             if not card:
                 card = {
                     "tmdb_id": _int(row["tmdb_id"]),
-                    "title": row["title"] or "Serie",
+                    "title": row["title"] or folder_key or "Serie",
                     "year": row["year"],
                     "poster_url": row["poster_url"],
                     "media_type": "series",
