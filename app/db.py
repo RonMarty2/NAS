@@ -198,6 +198,7 @@ def init_db():
             "missing": "INTEGER DEFAULT 0",
             "source": "TEXT DEFAULT 'scan'",
             "match_attempts": "INTEGER DEFAULT 0",
+            "import_root": "TEXT",
         }
         for col, coltype in catalog_migrations.items():
             if col not in existing_catalog:
@@ -270,7 +271,7 @@ def set_catalog_cache(cache_key, value, updated_at=None):
 def upsert_catalog_file(path, filename, size_bytes=0, mtime_ns=0, **fields):
     allowed = {
         "media_type", "tmdb_id", "title", "year", "poster_url", "overview",
-        "quality", "langs", "last_seen", "missing", "source",
+        "quality", "langs", "last_seen", "missing", "source", "import_root",
     }
     data = {k: v for k, v in fields.items() if k in allowed}
     data.setdefault("last_seen", time.time())

@@ -93,6 +93,32 @@
       </section>
     {% endif %}
 
+    {% if by_folder %}
+      {% for folder in by_folder %}
+        <section class="album-section" data-album-section>
+          <div class="album-section-head">
+            <h2>📁 {{ folder.name }}</h2>
+            <span>{{ folder.count }} título(s) · {{ folder.root }}</span>
+          </div>
+          <div class="album-movie-grid">
+            {% for movie in folder.items %}
+              <article class="album-movie" data-album-card>
+                <div class="album-movie-poster">
+                  {% if movie.poster_url %}
+                    <img src="{{ movie.poster_url }}" alt="" loading="lazy">
+                  {% else %}
+                    <div class="album-poster-empty">Sin imagen</div>
+                  {% endif %}
+                </div>
+                <strong>{{ movie.title }}</strong>
+                <small>{% if movie.year %}{{ movie.year }}{% endif %}{% if movie.langs %} · {{ movie.langs }}{% endif %}</small>
+              </article>
+            {% endfor %}
+          </div>
+        </section>
+      {% endfor %}
+    {% endif %}
+
     {% if catalog.collections %}
       <section class="album-section" data-album-section id="sagasSection">
         <div class="album-section-head">

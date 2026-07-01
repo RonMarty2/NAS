@@ -784,6 +784,7 @@ def catalog_page(request: Request):
         "catalog": catalog.build_catalog(),
         "discover": catalog.build_discover(),
         "library_dups": catalog.library_duplicates(),
+        "by_folder": catalog.build_by_folder(),
         "suggested_roots": catalog.suggested_roots(),
         "dedup_running": bool(dedup_notice.get("running")),
         "delete_dup_running": bool(delete_dup_notice.get("running")),

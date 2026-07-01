@@ -308,6 +308,32 @@ def library_duplicates():
     return groups
 
 
+def build_by_folder():
+    """Agrupa la biblioteca por la carpeta que se escaneó: una sección por cada
+    carpeta importada (p.ej. 'peliculas', 'hxh'). Para archivos importados antes
+    de guardar la carpeta, cae en la carpeta contenedora como respaldo."""
+    groups = {}
+    for row in db.list_catalog_files(missing=False):
+        root = row["import_root"] or os.path.dirname(row["path"])
+        g = groups.setdefault(root, {"root": root, "name": os.path.basename(root.rstrip("/\\")) or root, "items": []})
+        g["items"].append({
+            "tmdb_id": _int(row["tmdb_id"]),
+            "title": row["title"] or row["filename"],
+            "year": row["year"],
+            "poster_url": row["poster_url"],
+            "media_type": row["media_type"],
+            "quality": row["quality"] or "",
+            "langs": row["langs"] or "",
+        })
+    sections = []
+    for g in groups.values():
+        g["items"].sort(key=lambda m: ((m["title"] or "").lower(), m["year"] or 0))
+        g["count"] = len(g["items"])
+        sections.append(g)
+    sections.sort(key=lambda s: s["name"].lower())
+    return sections
+
+
 def _human_size(n):
     n = float(n or 0)
     for unit in ["B", "KB", "MB", "GB", "TB"]:
@@ -444,6 +470,7 @@ def import_folder(root, enrich_limit=80, progress=None):
         return {"scanned": 0, "matched": 0, "message": "La carpeta no existe o no es accesible."}
     if not _within_catalog_roots(root):
         return {"scanned": 0, "matched": 0, "message": "Esa carpeta esta fuera de las bibliotecas configuradas."}
+    import_root = os.path.normpath(root)  # carpeta escaneada, para agrupar por carpeta
     scan_ts = time.time()
     scanned = 0
     matched = 0
@@ -476,6 +503,7 @@ def import_folder(root, enrich_limit=80, progress=None):
                 "last_seen": scan_ts,
                 "missing": 0,
                 "source": "scan",
+                "import_root": import_root,  # carpeta que se escaneó (para agrupar)
             }
             if media_type == "movie" and matched < enrich_limit and tmdb.configured():
                 match = tmdb.best_match(fields["title"], "movie", fields["year"])
