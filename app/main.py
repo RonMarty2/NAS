@@ -785,6 +785,7 @@ def _target_check_html(summary):
 def catalog_page(request: Request):
     dedup_notice = _dedup_notice()
     delete_dup_notice = _delete_dup_notice()
+    cat = catalog.build_catalog()
     return templates.TemplateResponse(request, "catalog.html", {
         "request": request,
         "tabs": TABS,
@@ -792,10 +793,13 @@ def catalog_page(request: Request):
         "page": "catalog",
         "tab_counts": db.pending_counts(),
         **_base_context(),
-        "catalog": catalog.build_catalog(),
+        "catalog": cat,
         "discover": catalog.build_discover(),
-        "library_dups": catalog.library_duplicates(),
-        "by_folder": catalog.build_by_folder(),
+        # library_dups y by_folder ahora vienen del mismo catalog_rows que
+        # build_catalog() ya leyó (comparten su caché de 15s) en vez de
+        # recorrer la tabla de nuevo en cada carga de la página.
+        "library_dups": cat.get("library_dups", []),
+        "by_folder": cat.get("by_folder", []),
         "suggested_roots": catalog.suggested_roots(),
         "dedup_running": bool(dedup_notice.get("running")),
         "delete_dup_running": bool(delete_dup_notice.get("running")),
@@ -1033,7 +1037,8 @@ def health_delete(path: str = Form("")):
 def wishlist_page(request: Request, q: str = "", media_type: str = "movie"):
     media_type = media_type if media_type in ("movie", "series") else "movie"
     results = wishlist.search(q, media_type) if q.strip() else []
-    existing_ids = {int(r["tmdb_id"]) for r in db.list_wishlist()}
+    items = wishlist.list_wishlist()
+    existing_ids = {int(r["tmdb_id"]) for r in db.list_wishlist()}  # sin filtrar (incluye ya obtenidos, para no reofrecerlos en resultados)
     return templates.TemplateResponse(request, "wishlist.html", {
         "request": request,
         "tabs": TABS,
@@ -1041,7 +1046,7 @@ def wishlist_page(request: Request, q: str = "", media_type: str = "movie"):
         "page": "wishlist",
         "tab_counts": db.pending_counts(),
         **_base_context(),
-        "items": wishlist.list_wishlist(),
+        "items": items,
         "results": results,
         "existing_ids": existing_ids,
         "q": q,

@@ -216,7 +216,14 @@ def _build_catalog_uncached():
     )
     standalone = sorted(standalone, key=lambda m: (m.get("year") or 9999, m.get("title") or ""))
     companies_list = sorted(companies.values(), key=lambda c: (-c["count"], c["name"].lower()))[:18]
-    series_prog, series_uncached = series_progress()
+    series_prog, series_uncached = series_progress(catalog_rows=catalog_rows)
+
+    # library_dups y by_folder viven aquí (no en llamadas sueltas del route) para
+    # compartir el mismo catalog_rows ya leído, y heredar la caché de 15s de
+    # build_catalog(). Antes se recalculaban en CADA carga de /catalog (sin
+    # caché propia), repitiendo un recorrido completo de la tabla cada vez.
+    library_dups = library_duplicates(catalog_rows=catalog_rows)
+    by_folder = build_by_folder(catalog_rows=catalog_rows)
 
     return {
         "collections": collections_list,
@@ -229,6 +236,8 @@ def _build_catalog_uncached():
         "imported_total": len(catalog_rows),
         "uncached": uncached,
         "tmdb_configured": tmdb.configured(),
+        "library_dups": library_dups,
+        "by_folder": by_folder,
     }
 
 
@@ -307,13 +316,16 @@ def refresh_existing():
     return {"checked": checked, "removed": removed}
 
 
-def library_duplicates():
+def library_duplicates(catalog_rows=None):
     """Películas de la biblioteca que están DUPLICADAS de verdad: el MISMO título
     (según el nombre del archivo) en dos o más rutas. Es estricto a propósito
     porque hay un botón de borrar: no basta con que TMDB les diera el mismo id
-    (eso marcaba por error pelis distintas de una saga, p.ej. The Purge)."""
+    (eso marcaba por error pelis distintas de una saga, p.ej. The Purge).
+
+    `catalog_rows` (opcional) evita un recorrido extra de la tabla si el
+    llamador ya la tiene a mano (ver _build_catalog_uncached)."""
     by_key = {}
-    for row in db.list_catalog_files(missing=False):
+    for row in (catalog_rows if catalog_rows is not None else db.list_catalog_files(missing=False)):
         if row["media_type"] != "movie":
             continue
         key = _dup_key(row["filename"], row["year"])
@@ -374,7 +386,7 @@ def _nearest_root(path):
     return best
 
 
-def build_by_folder():
+def build_by_folder(catalog_rows=None):
     """Agrupa la biblioteca por la carpeta que se escaneó: una sección por cada
     carpeta importada (p.ej. 'peliculas', 'hxh'). Para archivos importados antes
     de guardar la carpeta, usa la carpeta de biblioteca configurada que la
@@ -382,11 +394,13 @@ def build_by_folder():
 
     Las series se colapsan en UNA tarjeta por serie (con el nº de episodios),
     no una por episodio: si no, una sola serie con 60 capítulos llenaba toda
-    la pantalla de tarjetas vacías repetidas ('Serie', S01E01, S01E02...)."""
+    la pantalla de tarjetas vacías repetidas ('Serie', S01E01, S01E02...).
+
+    `catalog_rows` (opcional) evita un recorrido extra de la tabla."""
     groups = {}
     series_by_group = {}  # (root, clave_serie) -> tarjeta acumulada
 
-    for row in db.list_catalog_files(missing=False):
+    for row in (catalog_rows if catalog_rows is not None else db.list_catalog_files(missing=False)):
         root = row["import_root"] or _nearest_root(row["path"]) or os.path.dirname(row["path"])
         g = groups.setdefault(root, {"root": root, "name": os.path.basename(root.rstrip("/\\")) or root, "items": []})
 
@@ -802,9 +816,12 @@ def series_detail_cached(tmdb_id):
     return _get_json(f"series:{tmdb_id}") if tmdb_id else None
 
 
-def owned_episode_map():
+def owned_episode_map(done_series_items=None, catalog_rows=None):
     """{tmdb_id: {season_number: {episode_numbers...}}} de lo que ya tienes,
-    combinando lo organizado (items) y lo importado de biblioteca (catalog_files)."""
+    combinando lo organizado (items) y lo importado de biblioteca (catalog_files).
+
+    Acepta las listas ya cargadas (opcional) para no repetir consultas cuando
+    el llamador (series_progress) ya las tiene."""
     owned = {}
 
     def _add(tmdb_id, season, episode):
@@ -818,9 +835,11 @@ def owned_episode_map():
             return
         owned.setdefault(tmdb_id, {}).setdefault(season, set()).add(episode)
 
-    for it in db.list_items(status="done", media_type="series"):
+    done_series_items = db.list_items(status="done", media_type="series") if done_series_items is None else done_series_items
+    catalog_rows = db.list_catalog_files(missing=False) if catalog_rows is None else catalog_rows
+    for it in done_series_items:
         _add(it["tmdb_id"], it["season"], it["episode"])
-    for row in db.list_catalog_files(missing=False):
+    for row in catalog_rows:
         if row["media_type"] == "series":
             _add(row["tmdb_id"], row["season"], row["episode"])
     return owned
@@ -836,17 +855,21 @@ def _series_title_poster(tmdb_id, items_by_id, rows_by_id):
     return ("", None)
 
 
-def series_progress():
+def series_progress(catalog_rows=None):
     """Series reconocidas (con tmdb_id) con progreso de episodios por temporada:
-    cuáles tienes y cuáles te faltan. Solo usa la caché (sin llamar a la red)."""
-    episodes = owned_episode_map()
+    cuáles tienes y cuáles te faltan. Solo usa la caché (sin llamar a la red).
+
+    `catalog_rows` (opcional) evita un recorrido extra de catalog_files."""
+    done_series_items = db.list_items(status="done", media_type="series")
+    catalog_rows = db.list_catalog_files(missing=False) if catalog_rows is None else catalog_rows
+    episodes = owned_episode_map(done_series_items=done_series_items, catalog_rows=catalog_rows)
     items_by_id = {}
-    for it in db.list_items(status="done", media_type="series"):
+    for it in done_series_items:
         tmdb_id = _int(it["tmdb_id"])
         if tmdb_id and tmdb_id not in items_by_id:
             items_by_id[tmdb_id] = it
     rows_by_id = {}
-    for row in db.list_catalog_files(missing=False):
+    for row in catalog_rows:
         if row["media_type"] != "series":
             continue
         tmdb_id = _int(row["tmdb_id"])

@@ -7,7 +7,7 @@ import json
 import os
 import time
 
-from . import config, db, filemeta
+from . import catalog, config, db, filemeta
 
 STATUS_KEY = "health_status"
 RESULT_KEY = "health_result"
@@ -167,4 +167,9 @@ def delete_broken(path):
     result["broken"] = [b for b in result.get("broken", []) if b["path"] != path]
     result["orphans"] = [o for o in result.get("orphans", []) if o["path"] != path]
     _set_result(result)
+    # Si ese archivo también estaba en el Catálogo (importado), lo quitamos de
+    # ahí también; si no, quedaría una tarjeta "fantasma" apuntando a un
+    # archivo que ya no existe hasta el próximo escaneo/actualización.
+    db.delete_catalog_file(path)
+    catalog.invalidate_build()
     return True
