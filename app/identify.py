@@ -1,11 +1,34 @@
 """Identificación inicial del archivo: tipo (película/serie/música) y datos básicos
 deducidos del nombre con guessit."""
+import concurrent.futures
 import os
 import re
 
 from guessit import guessit
 
 from . import config
+
+# Guardián con límite de tiempo: guessit analiza el nombre con expresiones
+# regulares y, aunque es rarísimo, un nombre de archivo patológico podría
+# colgarlo. Sin esto, UN solo archivo raro podía dejar pegado para siempre
+# tanto el escaneo de descargas (automático, cada 30s) como una importación
+# de biblioteca, sin ningún error visible.
+#
+# Se crea un ejecutor nuevo (un hilo) por llamada, no uno compartido: si un
+# archivo se cuelga de verdad, ese hilo queda abandonado (se libera solo)
+# en vez de bloquear también los archivos siguientes.
+_GUARD_TIMEOUT = 8.0
+
+
+def _run_guarded(fn, *args, fallback=None):
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    try:
+        future = executor.submit(fn, *args)
+        return future.result(timeout=_GUARD_TIMEOUT)
+    except Exception:
+        return fallback
+    finally:
+        executor.shutdown(wait=False)
 
 # Etiquetas de idioma frecuentes en los nombres (escena en español).
 _LANG_MAP = {
@@ -93,3 +116,18 @@ def identify(path):
         "quality": quality,
         "langs": langs,
     }
+
+
+_IDENTIFY_FALLBACK = {"media_type": "unknown", "title": None, "year": None, "season": None, "episode": None}
+
+
+def identify_safe(path):
+    """Igual que identify(), pero nunca se queda colgada para siempre: si
+    tarda más de unos segundos, sigue adelante con un resultado vacío."""
+    return _run_guarded(identify, path, fallback=dict(_IDENTIFY_FALLBACK))
+
+
+def tech_info_safe(filename):
+    """Igual que tech_info(), con el mismo límite de tiempo de seguridad."""
+    result = _run_guarded(tech_info, filename, fallback=("", ""))
+    return result if result is not None else ("", "")

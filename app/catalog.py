@@ -673,9 +673,9 @@ def import_folder(root, enrich_limit=80, progress=None):
                 db.touch_catalog_file(path, last_seen=scan_ts, import_root=import_root)
                 skipped += 1
                 continue
-            ident = identify.identify(path)
+            ident = identify.identify_safe(path)
             media_type = ident.get("media_type") if ident.get("media_type") in ("movie", "series") else "movie"
-            quality, langs = identify.tech_info(filename)
+            quality, langs = identify.tech_info_safe(filename)
             fields = {
                 "media_type": media_type,
                 "title": ident.get("title") or _fallback_title(filename),

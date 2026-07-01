@@ -122,7 +122,7 @@ def _process_file(path):
         db.update_item(item_id, media_info=filemeta.to_json(info))
     except Exception:
         pass
-    ident = identify.identify(path)
+    ident = identify.identify_safe(path)
     try:
         _enrich(item_id, path, ident)
     except Exception as e:  # nunca dejar el item a medias por un fallo de red
@@ -138,7 +138,7 @@ def backfill_tech():
             continue
         if it["quality"] is not None:
             continue  # ya calculado
-        quality, langs = identify.tech_info(it["filename"])
+        quality, langs = identify.tech_info_safe(it["filename"])
         db.update_item(it["id"], quality=quality, langs=langs)
 
 
@@ -190,7 +190,7 @@ def reidentify(item_id, forced_type):
     item = db.get_item(item_id)
     if not item:
         return
-    ident = identify.identify(item["original_path"])
+    ident = identify.identify_safe(item["original_path"])
     ident["media_type"] = forced_type  # respetamos la elección del usuario
     # Limpiamos la coincidencia anterior para que se vuelva a buscar bien.
     db.update_item(item_id, tmdb_id=None, chosen_title=None, chosen_year=None,
