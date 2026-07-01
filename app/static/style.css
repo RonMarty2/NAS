@@ -759,11 +759,17 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
 .season-row small { color: var(--album-muted); font-size: .74rem; }
 .season-row small.missing-text { color: var(--warn); }
 
-/* --- Separador entre vistas generales y "por carpeta" en Catalogo --- */
-.album-divider {
-  margin: 2.2rem 0 .4rem;
-  padding-top: 1.2rem;
-  border-top: 1px dashed rgba(255,255,255,.12);
+/* --- Pestañas DENTRO de Catálogo: General vs Por carpeta --- */
+.catalog-subtabs {
+  display: flex; gap: .4rem; margin: 1.1rem 0 .3rem;
+  border-bottom: 1px solid rgba(255,255,255,.08);
 }
-.album-divider h2 { margin: 0 0 .25rem; font-size: 1.15rem; }
-.album-divider p { margin: 0; color: var(--album-muted); font-size: .84rem; }
+.catalog-subtab {
+  background: none; border: none; cursor: pointer;
+  color: var(--album-muted); font-weight: 700; font-size: .92rem;
+  padding: .5rem .3rem .6rem; margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+}
+.catalog-subtab:hover { color: var(--album-text, #e6edf3); }
+.catalog-subtab.active { color: var(--primary); border-bottom-color: var(--primary); }
+.catalog-tab-panel[hidden] { display: none; }

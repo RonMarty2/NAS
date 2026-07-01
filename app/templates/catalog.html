@@ -62,6 +62,13 @@
       <small id="albumSearchSummary"></small>
     </section>
 
+    <div class="catalog-subtabs">
+      <button type="button" class="catalog-subtab active" data-catalog-tab="general" onclick="showCatalogTab('general')">General</button>
+      <button type="button" class="catalog-subtab" data-catalog-tab="folders" onclick="showCatalogTab('folders')">📁 Por carpeta{% if by_folder %} ({{ by_folder|length }}){% endif %}</button>
+    </div>
+
+    <div id="catalogTabGeneral" class="catalog-tab-panel">
+
     {% if library_dups %}
       <section class="album-section" data-album-section>
         <div class="album-section-head">
@@ -253,39 +260,6 @@
       </section>
     {% endif %}
 
-    {% if by_folder %}
-      <div class="album-divider">
-        <h2>📁 Por carpeta escaneada</h2>
-        <p>Lo de arriba (Sagas, Películas, Series, Duplicados) junta TODO sin importar la carpeta. Aquí abajo, en cambio, cada carpeta que escaneaste tiene su propia sección.</p>
-      </div>
-      {% for folder in by_folder %}
-        <section class="album-section" data-album-section>
-          <div class="album-section-head">
-            <h2>📁 {{ folder.name }}</h2>
-            <span>{{ folder.count }} título(s) · {{ folder.root }}</span>
-          </div>
-          <div class="album-movie-grid">
-            {% for movie in folder['items'] %}
-              <article class="album-movie" data-album-card>
-                <div class="album-movie-poster">
-                  {% if movie.poster_url %}
-                    <img src="{{ movie.poster_url }}" alt="" loading="lazy">
-                  {% else %}
-                    <div class="album-poster-empty">Sin imagen</div>
-                  {% endif %}
-                </div>
-                <strong>{{ movie.title }}</strong>
-                <small>
-                  {% if movie.episode_count %}{{ movie.episode_count }} episodio(s){% elif movie.year %}{{ movie.year }}{% endif %}
-                  {% if movie.langs %} · {{ movie.langs }}{% endif %}
-                </small>
-              </article>
-            {% endfor %}
-          </div>
-        </section>
-      {% endfor %}
-    {% endif %}
-
     {% if discover and discover.groups %}
       {% for group in discover.groups %}
         <section class="album-section" data-album-section>
@@ -344,6 +318,43 @@
         <p>Pulsa <strong>Traer lo que ya tengo</strong> para cargar las películas que ya están en el NAS.</p>
       </section>
     {% endif %}
+
+    </div>
+    <div id="catalogTabFolders" class="catalog-tab-panel" hidden>
+    {% if by_folder %}
+      {% for folder in by_folder %}
+        <section class="album-section" data-album-section>
+          <div class="album-section-head">
+            <h2>📁 {{ folder.name }}</h2>
+            <span>{{ folder.count }} título(s) · {{ folder.root }}</span>
+          </div>
+          <div class="album-movie-grid">
+            {% for movie in folder['items'] %}
+              <article class="album-movie" data-album-card>
+                <div class="album-movie-poster">
+                  {% if movie.poster_url %}
+                    <img src="{{ movie.poster_url }}" alt="" loading="lazy">
+                  {% else %}
+                    <div class="album-poster-empty">Sin imagen</div>
+                  {% endif %}
+                </div>
+                <strong>{{ movie.title }}</strong>
+                <small>
+                  {% if movie.episode_count %}{{ movie.episode_count }} episodio(s){% elif movie.year %}{{ movie.year }}{% endif %}
+                  {% if movie.langs %} · {{ movie.langs }}{% endif %}
+                </small>
+              </article>
+            {% endfor %}
+          </div>
+        </section>
+      {% endfor %}
+    {% else %}
+      <section class="album-empty">
+        <h2>Aún no hay carpetas escaneadas</h2>
+        <p>Cuando escanees una biblioteca (arriba, "Traer lo que ya tengo"), aparecerá aquí como su propia sección.</p>
+      </section>
+    {% endif %}
+    </div>
 
     <section id="albumSearchEmpty" class="album-empty album-empty-search" hidden>
       <h2>No aparece en tu álbum</h2>
@@ -440,5 +451,23 @@
       });
       btn.textContent = on ? "Ver todas" : "Ver solo las que faltan";
     }
+
+    // Pestañas DENTRO de Catálogo (General vs Por carpeta). No recarga la
+    // página: solo muestra/oculta, así cambiar de vista es instantáneo.
+    function showCatalogTab(name) {
+      document.querySelectorAll(".catalog-tab-panel").forEach(function (panel) {
+        panel.hidden = panel.id !== "catalogTab" + (name === "general" ? "General" : "Folders");
+      });
+      document.querySelectorAll(".catalog-subtab").forEach(function (btn) {
+        btn.classList.toggle("active", btn.getAttribute("data-catalog-tab") === name);
+      });
+      try { sessionStorage.setItem("nas-catalog-tab", name); } catch (e) {}
+    }
+    (function () {
+      try {
+        var saved = sessionStorage.getItem("nas-catalog-tab");
+        if (saved === "folders") showCatalogTab("folders");
+      } catch (e) {}
+    })();
   </script>
 {% endblock %}
