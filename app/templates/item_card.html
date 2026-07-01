@@ -63,7 +63,7 @@
       <p class="preview">Quedará en: <span id="prev-{{ item['id'] }}">{{ base_def }}/{{ leaf }}</span></p>
       {% set check_id = item['id'] %}
       {% include "target_notice.html" %}
-      <form method="post" action="/item/{{ item['id'] }}/confirm">
+      <form method="post" action="/item/{{ item['id'] }}/confirm" onsubmit="return markSubmitting(this, 'Moviendo...');">
         <input type="hidden" name="dest_folder" id="dest-{{ item['id'] }}" value="{{ base_def }}">
         <button class="btn btn-primary" type="submit">
           {% if target.exact_exists %}Comparar versiones{% else %}✅ Confirmar y mover{% endif %}

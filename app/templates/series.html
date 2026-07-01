@@ -87,7 +87,7 @@
                 </div>
               {% endif %}
             </div>
-            <form method="post" action="/series/confirm-all">
+            <form method="post" action="/series/confirm-all" onsubmit="return confirmAndMarkSubmit(this, 'Se moverán los {{ g.count }} episodio(s) de una vez. ¿Continuar?', 'Moviendo...');">
               {% for ep in g.episodes %}<input type="hidden" name="ids" value="{{ ep['id'] }}">{% endfor %}
               <input type="hidden" name="dest_folder" id="dest-{{ g.gid }}" value="{{ g.default_base }}">
               <button class="btn btn-primary" type="submit">

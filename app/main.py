@@ -370,12 +370,22 @@ def _activity(scan_notice=None, local_metadata_notice=None, catalog_notice=None)
     counts = db.pending_counts()
 
     health_notice = health.status()
-    active = bool(
-        processing
-        or dedup.get("running") or delete_dup.get("running")
-        or scan_notice.get("running") or local_notice.get("running")
-        or catalog_notice.get("running") or health_notice.get("running")
-    )
+    running_jobs = []
+    if processing:
+        running_jobs.append("moviendo archivos")
+    if dedup.get("running"):
+        running_jobs.append("limpiando duplicados")
+    if delete_dup.get("running"):
+        running_jobs.append("verificando duplicado")
+    if scan_notice.get("running"):
+        running_jobs.append("buscando descargas nuevas")
+    if local_notice.get("running"):
+        running_jobs.append("generando metadata local")
+    if catalog_notice.get("running"):
+        running_jobs.append("actualizando catálogo")
+    if health_notice.get("running"):
+        running_jobs.append("analizando biblioteca")
+    active = bool(running_jobs)
     sig = "|".join(str(x) for x in [
         processing, sum(counts.values()),
         dedup.get("running"), dedup.get("done"), dedup.get("deleted"), dedup.get("errors"),
@@ -385,7 +395,16 @@ def _activity(scan_notice=None, local_metadata_notice=None, catalog_notice=None)
         catalog_notice.get("running"), catalog_notice.get("done"), catalog_notice.get("message"),
         health_notice.get("running"), health_notice.get("message"),
     ])
-    return {"active": active, "sig": sig}
+    return {
+        "active": active,
+        "sig": sig,
+        # Varias tareas pesadas corriendo a la vez compiten por el CPU/disco
+        # modesto del NAS. No las bloqueamos (a veces es legítimo), pero
+        # avisamos con claridad para que el usuario sepa por qué todo se
+        # siente lento y pueda esperar a que termine una antes de la otra.
+        "running_jobs": running_jobs,
+        "multiple_running": len(running_jobs) > 1,
+    }
 
 
 @app.get("/api/status")

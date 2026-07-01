@@ -38,6 +38,12 @@
   </header>
 
   <main>
+    {% if activity and activity.multiple_running %}
+      <div class="scan-banner warn">
+        <strong>⚠️ Varias tareas pesadas corriendo a la vez</strong>
+        <span>{{ activity.running_jobs|join(" + ") }}. Tu NAS es de gama modesta: hacer varias cosas pesadas al mismo tiempo hace que todo se sienta lento (o parezca atascado, aunque no lo esté). Si puedes, espera a que termine una antes de empezar otra.</span>
+      </div>
+    {% endif %}
     {% if scan_notice and scan_notice.visible %}
       <div class="scan-banner {{ 'running' if scan_notice.running else 'done' }}">
         <strong>{% if scan_notice.running %}Buscando archivos nuevos{% else %}Busqueda terminada{% endif %}</strong>
