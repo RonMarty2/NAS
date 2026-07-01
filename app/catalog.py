@@ -403,6 +403,42 @@ def apply_manual_match(path, tmdb_id, media_type):
     return True, f"Actualizado a: {detail.get('title')} ({detail.get('year') or 's/f'})."
 
 
+def prune_cache():
+    """Borra de la caché de TMDB lo que ya no corresponde a nada que tengas:
+    películas/series que borraste de la biblioteca y sagas que ya ninguna
+    película tuya referencia. Evita que la base de datos crezca para siempre.
+    Corre al final de 'Actualizar datos' (barato: solo mira claves)."""
+    owned_movies = owned_movie_ids()
+    owned_series = set()
+    for it in db.list_items(status="done", media_type="series"):
+        if _int(it["tmdb_id"]):
+            owned_series.add(_int(it["tmdb_id"]))
+    for row in db.list_catalog_files(missing=False):
+        if row["media_type"] == "series" and _int(row["tmdb_id"]):
+            owned_series.add(_int(row["tmdb_id"]))
+
+    # Sagas aún referenciadas por alguna película que sí tienes.
+    used_collections = set()
+    movie_cache = db.get_catalog_cache_many(f"movie:{mid}" for mid in owned_movies)
+    for key, row in movie_cache.items():
+        detail = _json_from_row(row) or {}
+        collection = detail.get("collection") or {}
+        if collection.get("id"):
+            used_collections.add(_int(collection["id"]))
+
+    stale = []
+    for key in db.list_catalog_cache_keys():
+        kind, _, raw_id = key.partition(":")
+        if kind == "movie" and _int(raw_id) not in owned_movies:
+            stale.append(key)
+        elif kind == "series" and _int(raw_id) not in owned_series:
+            stale.append(key)
+        elif kind == "collection" and _int(raw_id) not in used_collections:
+            stale.append(key)
+        # discover:* y cualquier otra clave se conservan.
+    return db.delete_catalog_cache_keys(stale)
+
+
 def refresh_existing():
     """Revisión RÁPIDA (sin tocar TMDB): comprueba qué archivos ya catalogados
     siguen existiendo en disco y marca como faltantes los que ya no. Útil
@@ -529,6 +565,9 @@ def build_by_folder(catalog_rows=None):
                     "quality": row["quality"] or "",
                     "langs": row["langs"] or "",
                     "episode_count": 0,
+                    # Ruta de un episodio cualquiera: alcanza para "Corregir",
+                    # porque corregir una serie aplica a toda su carpeta.
+                    "path": row["path"],
                     "_tmdb_votes": {},
                 }
                 series_by_group[key] = card

@@ -272,6 +272,24 @@ def get_catalog_cache_many(cache_keys):
     return out
 
 
+def list_catalog_cache_keys():
+    with get_conn() as conn:
+        return [r["cache_key"] for r in conn.execute("SELECT cache_key FROM catalog_cache").fetchall()]
+
+
+def delete_catalog_cache_keys(keys):
+    """Borra entradas de caché en lotes (limpieza de datos ya sin uso)."""
+    keys = list(keys)
+    if not keys:
+        return 0
+    with _lock, get_conn() as conn:
+        for i in range(0, len(keys), 400):
+            chunk = keys[i:i + 400]
+            placeholders = ",".join("?" for _ in chunk)
+            conn.execute(f"DELETE FROM catalog_cache WHERE cache_key IN ({placeholders})", chunk)
+    return len(keys)
+
+
 def set_catalog_cache(cache_key, value, updated_at=None):
     if updated_at is None:
         updated_at = time.time()

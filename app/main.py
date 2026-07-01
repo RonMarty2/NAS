@@ -1018,6 +1018,7 @@ def _start_catalog_update(limit):
             result = catalog.update_catalog(limit=limit, progress=push)
             catalog.update_discover(limit=len(catalog.DISCOVER_SECTIONS), progress=push)
             catalog.update_series_details(limit=max(40, limit), progress=push)
+            catalog.prune_cache()  # limpia caché de cosas que ya no tienes
             catalog.invalidate_build()
             if enriched:
                 result["message"] = result.get("message", "") + f" Pósters completados: {enriched}."
