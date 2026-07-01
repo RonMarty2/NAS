@@ -787,35 +787,57 @@ def enrich_unmatched(limit=None, progress=None):
 
 
 def enrich_unmatched_series(limit=None, progress=None):
-    """Reintenta reconocer en TMDB las SERIES importadas sin tmdb_id.
+    """Reintenta reconocer las SERIES importadas sin tmdb_id, por carpeta.
 
-    Agrupa los episodios por su carpeta de serie y hace UNA sola búsqueda por
-    serie, aplicando el resultado a todos sus episodios. Antes buscaba por
-    episodio: una serie con 147 capítulos sin reconocer disparaba 147
-    búsquedas idénticas (lento y castiga la red del NAS). Devuelve cuántos
-    episodios quedaron reconocidos."""
-    if not tmdb.configured():
-        return 0
-    # Agrupar pendientes por (raíz, carpeta de la serie).
-    groups = {}
+    Primero SIN red: si en la misma carpeta hay episodios YA reconocidos, los
+    pendientes heredan esa identificación (mayoría) — gratis y aunque hubieran
+    agotado sus intentos. Esto cubre el caso 'Aída tiene 236 episodios
+    reconocidos y 36 atascados en sin reconocer'. Solo si la carpeta no tiene
+    ningún episodio reconocido se hace UNA búsqueda en TMDB por serie.
+    Devuelve cuántos episodios quedaron reconocidos."""
+    recognized = {}  # (root, carpeta) -> {tmdb_id: {"count", "row"}}
+    groups = {}      # (root, carpeta) -> {"folder", "rows"}
     for row in db.list_catalog_files(missing=False):
-        if row["media_type"] != "series" or _int(row["tmdb_id"]):
-            continue
-        if (row["match_attempts"] or 0) >= MAX_MATCH_ATTEMPTS:
+        if row["media_type"] != "series":
             continue
         root = row["import_root"] or _nearest_root(row["path"]) or os.path.dirname(row["path"])
         folder = _series_top_folder(row["path"], root)
-        groups.setdefault((root, folder.lower()), {"folder": folder, "rows": []})["rows"].append(row)
+        key = (root, folder.lower())
+        if _int(row["tmdb_id"]):
+            vote = recognized.setdefault(key, {}).setdefault(
+                _int(row["tmdb_id"]), {"count": 0, "row": row})
+            vote["count"] += 1
+        else:
+            groups.setdefault(key, {"folder": folder, "rows": []})["rows"].append(row)
 
-    series_list = list(groups.values())
+    series_list = list(groups.items())
     if limit:
         series_list = series_list[:int(limit)]
     total = len(series_list)
     matched = 0
-    for i, group in enumerate(series_list):
+    for i, (key, group) in enumerate(series_list):
         rows = group["rows"]
-        # El nombre de la carpeta de la serie es la mejor consulta (estable
-        # para todos los episodios); el del archivo, el respaldo.
+
+        # 1) Herencia local (sin red): la identificación mayoritaria de los
+        #    episodios ya reconocidos de la misma carpeta.
+        votes = recognized.get(key)
+        if votes:
+            best_id, best = max(votes.items(), key=lambda kv: kv[1]["count"])
+            src = best["row"]
+            for row in rows:
+                db.update_catalog_file(row["path"], tmdb_id=best_id, media_type="series",
+                                        title=src["title"], year=src["year"],
+                                        poster_url=src["poster_url"], overview=src["overview"],
+                                        match_attempts=0)
+                matched += 1
+            if progress:
+                progress({"done": i + 1, "total": total, "current": group["folder"]})
+            continue
+
+        # 2) Búsqueda en TMDB (una por serie), respetando el tope de intentos.
+        rows_retryable = [r for r in rows if (r["match_attempts"] or 0) < MAX_MATCH_ATTEMPTS]
+        if not rows_retryable or not tmdb.configured():
+            continue
         query = _query_title_from_filename(group["folder"]) or \
             _query_title_from_filename(rows[0]["filename"]) or (rows[0]["title"] or "")
         match = None
@@ -825,7 +847,7 @@ def enrich_unmatched_series(limit=None, progress=None):
             except Exception:
                 match = None
         if not match:
-            for row in rows:
+            for row in rows_retryable:
                 db.update_catalog_file(row["path"], match_attempts=(row["match_attempts"] or 0) + 1)
         else:
             if _cache_stale(f"series:{match['tmdb_id']}"):
