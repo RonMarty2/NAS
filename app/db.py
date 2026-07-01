@@ -287,6 +287,19 @@ def upsert_catalog_file(path, filename, size_bytes=0, mtime_ns=0, **fields):
         )
 
 
+def update_catalog_file(path, **fields):
+    """Actualiza campos concretos de una fila del catálogo (por ruta)."""
+    allowed = {"media_type", "tmdb_id", "title", "year", "poster_url", "overview",
+               "quality", "langs", "missing", "source"}
+    data = {k: v for k, v in fields.items() if k in allowed}
+    if not data:
+        return
+    cols = ", ".join(f"{k}=?" for k in data)
+    vals = list(data.values()) + [path]
+    with _lock, get_conn() as conn:
+        conn.execute(f"UPDATE catalog_files SET {cols} WHERE path=?", vals)
+
+
 def get_catalog_file_by_path(path):
     with get_conn() as conn:
         return conn.execute("SELECT * FROM catalog_files WHERE path=?", (path,)).fetchone()

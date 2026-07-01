@@ -326,6 +326,48 @@ def update_discover(limit=20, progress=None):
     return {"done": done, "message": f"Descubre actualizado: {done} lista(s)."}
 
 
+def enrich_unmatched(limit=60, progress=None):
+    """Rellena póster/datos de las películas importadas que aún no tienen match
+    de TMDB (aparecen como 'Sin imagen'). Bounded por tanda para no castigar el
+    NAS; al repetir 'Actualizar datos' se van completando todas."""
+    if not tmdb.configured():
+        return 0
+    done = 0
+    for row in db.list_catalog_files(missing=False):
+        if done >= limit:
+            break
+        if row["media_type"] != "movie" or _int(row["tmdb_id"]):
+            continue
+        title = row["title"] or _fallback_title(row["filename"])
+        if not title:
+            continue
+        try:
+            match = tmdb.best_match(title, "movie", row["year"])
+        except Exception:
+            match = None
+        done += 1
+        if not match:
+            continue
+        db.update_catalog_file(row["path"], **{
+            "tmdb_id": match["tmdb_id"],
+            "title": match["title"] or title,
+            "year": match["year"] or row["year"],
+            "poster_url": match["poster_url"],
+            "overview": match["overview"],
+        })
+        detail = movie_detail(match["tmdb_id"]) or tmdb.movie_details(match["tmdb_id"])
+        if detail:
+            _set_json(f"movie:{match['tmdb_id']}", detail)
+            collection = detail.get("collection") or {}
+            if collection.get("id") and _cache_stale(f"collection:{collection['id']}"):
+                collection_detail = tmdb.collection_details(collection["id"])
+                if collection_detail:
+                    _set_json(f"collection:{collection['id']}", collection_detail)
+        if progress:
+            progress({"done": done, "total": limit, "current": match["title"] or title})
+    return done
+
+
 def import_folder(root, enrich_limit=80, progress=None):
     """Importa una carpeta existente de biblioteca bajo demanda.
 
