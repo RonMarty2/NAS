@@ -57,8 +57,8 @@ def owned_movie_entries(done_items=None, catalog_rows=None):
     catalog_rows = db.list_catalog_files(missing=False) if catalog_rows is None else catalog_rows
     for item in done_items:
         tmdb_id = _int(item["tmdb_id"])
-        if not tmdb_id:
-            continue
+        if not tmdb_id or tmdb_id in seen:
+            continue  # una tarjeta por película, aunque haya varias copias/versiones
         seen.add(tmdb_id)
         entries.append(_entry_from_item(item, "organizer"))
     for row in catalog_rows:
