@@ -850,6 +850,34 @@ def catalog_page(request: Request):
     })
 
 
+@app.get("/catalog/fix", response_class=HTMLResponse)
+def catalog_fix_page(request: Request, path: str = "", media_type: str = "movie", q: str = ""):
+    media_type = media_type if media_type in ("movie", "series") else "movie"
+    row = db.get_catalog_file_by_path(path) if path else None
+    results = catalog.search_candidates(q, media_type) if q.strip() else []
+    return templates.TemplateResponse(request, "catalog_fix.html", {
+        "request": request,
+        "tabs": TABS,
+        "active": "catalog",
+        "page": "catalog",
+        "tab_counts": db.pending_counts(),
+        **_base_context(),
+        "row": row,
+        "path": path,
+        "results": results,
+        "q": q,
+        "media_type": media_type,
+        "tmdb_configured": tmdb.configured(),
+    })
+
+
+@app.post("/catalog/fix/apply")
+def catalog_fix_apply(path: str = Form(...), tmdb_id: int = Form(...), media_type: str = Form("movie")):
+    ok, message = catalog.apply_manual_match(path, tmdb_id, media_type)
+    catalog.set_status({"running": False, "message": message})
+    return RedirectResponse("/catalog", status_code=303)
+
+
 @app.post("/catalog/refresh")
 def catalog_refresh():
     """Revisión rápida: quita del catálogo lo que ya no existe en disco (borrado

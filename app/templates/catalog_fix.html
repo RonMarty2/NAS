@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="album-page">
+    <section class="album-hero">
+      <div class="album-title">
+        <span class="album-kicker">Catálogo</span>
+        <h1>Corregir coincidencia</h1>
+        <p>Busca el título correcto en TMDB y elígelo. Se actualiza solo este archivo.</p>
+      </div>
+    </section>
+
+    {% if row %}
+      <section class="album-section">
+        <div class="album-section-head">
+          <h2>Archivo</h2>
+        </div>
+        <div class="fix-current">
+          <div class="album-movie-poster fix-current-poster">
+            {% if row.poster_url %}<img src="{{ row.poster_url }}" alt="">{% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
+          </div>
+          <div>
+            <strong>{{ row.title or row.filename }}</strong>
+            <small>{{ row.filename }}</small>
+            <small>{{ row.path }}</small>
+            <small>{% if row.tmdb_id %}Reconocido actualmente como TMDB #{{ row.tmdb_id }}{% else %}Sin reconocer todavía{% endif %}</small>
+          </div>
+        </div>
+      </section>
+    {% elif path %}
+      <div class="target-warning target-warning-strong">
+        <strong>No encontrado</strong>
+        <span>Ese archivo ya no está en el catálogo (puede que lo hayas borrado o movido).</span>
+      </div>
+    {% endif %}
+
+    {% if not tmdb_configured %}
+      <div class="target-warning target-warning-strong">
+        <strong>Falta TMDB</strong>
+        <span>Configura la API key de TMDB en Ajustes para poder buscar.</span>
+      </div>
+    {% endif %}
+
+    <section class="album-search">
+      <label for="fixSearch">Buscar el título correcto</label>
+      <form method="get" action="/catalog/fix" class="album-search-row">
+        <input type="hidden" name="path" value="{{ path }}">
+        <input id="fixSearch" type="search" name="q" value="{{ q }}" placeholder="Título de película o serie" autocomplete="off" autofocus>
+        <select name="media_type" class="album-limit">
+          <option value="movie" {% if media_type == "movie" %}selected{% endif %}>Película</option>
+          <option value="series" {% if media_type == "series" %}selected{% endif %}>Serie</option>
+        </select>
+        <button class="btn btn-primary" type="submit">Buscar</button>
+      </form>
+    </section>
+
+    {% if results %}
+      <section class="album-section">
+        <div class="album-section-head">
+          <h2>Resultados</h2>
+          <span>Elige el correcto</span>
+        </div>
+        <div class="album-movie-grid">
+          {% for r in results %}
+            <article class="album-movie" data-album-card>
+              <div class="album-movie-poster">
+                {% if r.poster_url %}<img src="{{ r.poster_url }}" alt="" loading="lazy">{% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
+              </div>
+              <strong>{{ r.title }}</strong>
+              <small>{{ r.year or "" }}</small>
+              <form method="post" action="/catalog/fix/apply">
+                <input type="hidden" name="path" value="{{ path }}">
+                <input type="hidden" name="tmdb_id" value="{{ r.tmdb_id }}">
+                <input type="hidden" name="media_type" value="{{ media_type }}">
+                {% set year_label = r.year or "s/f" %}
+                <button type="submit" class="btn btn-primary" onclick="return confirm('¿Usar {{ r.title|e }} ({{ year_label }}) para este archivo?');">✅ Usar este</button>
+              </form>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    {% elif q %}
+      <section class="album-empty">
+        <h2>Sin resultados</h2>
+        <p>Prueba con otro título, o revisa si elegiste Película/Serie correctamente.</p>
+      </section>
+    {% endif %}
+
+    <p><a class="btn btn-secondary" href="/catalog">← Volver al catálogo</a></p>
+  </div>
+{% endblock %}

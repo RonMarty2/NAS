@@ -224,6 +224,11 @@ def _build_catalog_uncached():
     # caché propia), repitiendo un recorrido completo de la tabla cada vez.
     library_dups = library_duplicates(catalog_rows=catalog_rows)
     by_folder = build_by_folder(catalog_rows=catalog_rows)
+    # La lista REAL de "sin reconocer todavía" (sin tmdb_id), separada del
+    # contador 'uncached' de arriba (que mezcla "sin tmdb_id" con "tiene
+    # tmdb_id pero el detalle aún no se cacheó"). Esta es la que responde
+    # "¿ya terminé con todo?": vacía = no queda ninguna huérfana.
+    unmatched = [row for row in catalog_rows if not _int(row["tmdb_id"])]
 
     return {
         "collections": collections_list,
@@ -238,6 +243,8 @@ def _build_catalog_uncached():
         "tmdb_configured": tmdb.configured(),
         "library_dups": library_dups,
         "by_folder": by_folder,
+        "unmatched": unmatched[:120],
+        "unmatched_total": len(unmatched),
     }
 
 
@@ -298,6 +305,65 @@ def _dup_key(filename, year):
     if not title_key:
         return None
     return (title_key, year or None)
+
+
+def unmatched_files():
+    """Películas y series importadas que TMDB TODAVÍA no reconoció (sin
+    tmdb_id). Es la lista real de 'huérfanas sin metadatos': la única forma
+    de saber con certeza que no queda nada suelto es que esta lista esté
+    vacía."""
+    return [
+        row for row in db.list_catalog_files(missing=False)
+        if not _int(row["tmdb_id"])
+    ]
+
+
+def search_candidates(query, media_type="movie"):
+    """Resultados de TMDB para que el usuario elija a mano cuál es el
+    correcto (corregir un archivo sin reconocer, o uno mal reconocido)."""
+    media_type = media_type if media_type in ("movie", "series") else "movie"
+    query = (query or "").strip()
+    if not query:
+        return []
+    return tmdb.search(query, media_type)
+
+
+def apply_manual_match(path, tmdb_id, media_type):
+    """Aplica a mano la coincidencia de TMDB que el usuario eligió para un
+    archivo concreto (arregla tanto 'sin reconocer' como 'reconoció mal')."""
+    row = db.get_catalog_file_by_path(path)
+    if not row:
+        return False, "Ese archivo ya no está en el catálogo."
+    tmdb_id = _int(tmdb_id)
+    if not tmdb_id:
+        return False, "Elige un resultado de la búsqueda."
+    media_type = media_type if media_type in ("movie", "series") else row["media_type"]
+
+    if media_type == "series":
+        detail = tmdb.tv_details(tmdb_id)
+        if not detail:
+            return False, "No se pudo obtener esa serie de TMDB."
+        _set_json(f"series:{tmdb_id}", detail)
+        db.update_catalog_file(path, tmdb_id=tmdb_id, media_type="series",
+                                title=detail.get("title"), year=detail.get("year"),
+                                poster_url=detail.get("poster_url"), overview=detail.get("overview"),
+                                match_attempts=0)
+    else:
+        detail = tmdb.movie_details(tmdb_id)
+        if not detail:
+            return False, "No se pudo obtener esa película de TMDB."
+        _set_json(f"movie:{tmdb_id}", detail)
+        collection = detail.get("collection") or {}
+        if collection.get("id") and _cache_stale(f"collection:{collection['id']}"):
+            collection_detail = tmdb.collection_details(collection["id"])
+            if collection_detail:
+                _set_json(f"collection:{collection['id']}", collection_detail)
+        db.update_catalog_file(path, tmdb_id=tmdb_id, media_type="movie",
+                                title=detail.get("title"), year=detail.get("year"),
+                                poster_url=detail.get("poster_url"), overview=detail.get("overview"),
+                                match_attempts=0)
+    invalidate_build()
+    return True, f"Actualizado a: {detail.get('title')} ({detail.get('year') or 's/f'})."
 
 
 def refresh_existing():
@@ -433,6 +499,7 @@ def build_by_folder(catalog_rows=None):
             "media_type": row["media_type"],
             "quality": row["quality"] or "",
             "langs": row["langs"] or "",
+            "path": row["path"],
             "episode_count": None,
         })
 

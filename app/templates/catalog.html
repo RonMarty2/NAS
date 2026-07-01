@@ -51,7 +51,10 @@
       <div><strong>{{ catalog.owned_total }}</strong><span>en el álbum</span></div>
       <div><strong>{{ catalog.imported_total }}</strong><span>desde tu biblioteca</span></div>
       <div><strong>{{ catalog.collections|length }}</strong><span>sagas</span></div>
-      <div><strong>{{ catalog.uncached }}</strong><span>por completar</span></div>
+      <div class="{{ 'stat-ok' if not catalog.unmatched_total else 'stat-warn' }}">
+        <strong>{{ catalog.unmatched_total }}</strong>
+        <span>{% if catalog.unmatched_total %}sin reconocer todavía{% else %}✅ todo reconocido{% endif %}</span>
+      </div>
     </section>
 
     <section class="album-search">
@@ -72,6 +75,31 @@
     </div>
 
     <div id="catalogTabGeneral" class="catalog-tab-panel">
+
+    {% if catalog.unmatched_total %}
+      <section class="album-section" data-album-section>
+        <div class="album-section-head">
+          <h2>⚠️ Sin reconocer ({{ catalog.unmatched_total }})</h2>
+          <span>{% if catalog.unmatched_total > catalog.unmatched|length %}mostrando {{ catalog.unmatched|length }} de {{ catalog.unmatched_total }} · {% endif %}pulsa "Actualizar datos" para intentar reconocerlas automáticamente, o corrígelas a mano</span>
+        </div>
+        <div class="unmatched-list">
+          {% for row in catalog.unmatched %}
+            <div class="unmatched-row" data-album-card>
+              <div class="unmatched-row-info">
+                <strong>{{ row.title or row.filename }}</strong>
+                <small>{{ row.path }}</small>
+              </div>
+              <a class="btn btn-secondary" href="/catalog/fix?path={{ row.path|urlencode }}&media_type={{ row.media_type }}">✏️ Buscar y corregir</a>
+            </div>
+          {% endfor %}
+        </div>
+      </section>
+    {% else %}
+      <div class="target-info">
+        <strong>✅ Todo reconocido</strong>
+        <span>No queda ninguna película o serie importada sin identificar en TMDB.</span>
+      </div>
+    {% endif %}
 
     {% if library_dups %}
       <section class="album-section" data-album-section>
@@ -362,6 +390,9 @@
                   {% if movie.episode_count %}{{ movie.episode_count }} episodio(s){% elif movie.year %}{{ movie.year }}{% endif %}
                   {% if movie.langs %} · {{ movie.langs }}{% endif %}
                 </small>
+                {% if movie.path %}
+                  <a class="fix-link" href="/catalog/fix?path={{ movie.path|urlencode }}&media_type={{ movie.media_type }}">✏️ Corregir</a>
+                {% endif %}
               </article>
             {% endfor %}
           </div>
