@@ -72,6 +72,8 @@ def _startup():
     _set_delete_dup_state({})
     _recover_scan_state()
     _recover_local_metadata_state()
+    _recover_catalog_state()
+    _recover_health_state()
     _start_move_worker()
     watcher.start_background()
 
@@ -314,6 +316,29 @@ def _recover_scan_state():
             "message": "El escaneo anterior se interrumpio al reiniciar la app. Pulsa Buscar ahora para intentarlo de nuevo.",
         })
         _set_scan_state(state)
+
+
+def _recover_catalog_state():
+    """Si el contenedor se reinició a mitad de una importación/actualización
+    del catálogo, el aviso 'Actualizando catálogo...' se quedaba pegado para
+    siempre (CATALOG_LOCK es nuevo en cada arranque, pero el mensaje guardado
+    seguía diciendo 'running'). Lo limpiamos al arrancar."""
+    state = catalog.status()
+    if state.get("running"):
+        catalog.set_status({
+            "running": False,
+            "message": "La actualización anterior se interrumpió al reiniciar la app. Vuelve a pulsar el botón para intentarlo de nuevo.",
+        })
+
+
+def _recover_health_state():
+    """Igual que _recover_catalog_state pero para el análisis de Salud."""
+    state = health.status()
+    if state.get("running"):
+        health.set_status({
+            "running": False,
+            "message": "El análisis anterior se interrumpió al reiniciar la app. Vuelve a pulsar Analizar.",
+        })
 
 
 def _base_context():
