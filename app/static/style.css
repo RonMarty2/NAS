@@ -660,3 +660,32 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
   .ep-actions { gap: .6rem; margin-top: .35rem; }
   .ep-actions .btn { padding: .45rem .8rem; }
 }
+
+/* --- Descubre (agrupaciones por género/década/estudio/populares) --- */
+.discover-row { margin-top: .9rem; }
+.discover-row-head {
+  display: flex; align-items: baseline; gap: .6rem;
+  margin: .2rem 0 .5rem;
+}
+.discover-row-head h3 { margin: 0; font-size: .98rem; }
+.discover-row-head span { color: var(--album-muted); font-size: .8rem; }
+.discover-grid {
+  grid-auto-flow: column;
+  grid-template-columns: none;
+  grid-auto-columns: 142px;
+  overflow-x: auto;
+  padding-bottom: .5rem;
+}
+.album-movie-poster { position: relative; }
+.discover-badge {
+  position: absolute; left: .3rem; bottom: .3rem;
+  border-radius: 6px; padding: .1rem .4rem;
+  font-size: .68rem; font-weight: 800;
+  background: rgba(0,0,0,.72);
+}
+.discover-badge.ok { color: var(--ok); }
+.discover-badge.warn { color: var(--warn); }
+/* En Descubre, atenúa un poco lo que ya tienes para que resalte lo que falta. */
+.discover-grid .album-movie.owned { filter: grayscale(.35) brightness(.82); }
+.discover-grid .album-movie.owned:hover { filter: none; }
+.album-only-missing { margin-left: auto; font-size: .8rem; padding: .28rem .6rem; }

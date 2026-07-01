@@ -219,6 +219,36 @@ def movie_details(tmdb_id):
     }
 
 
+def discover_movies(filters, limit=20):
+    """Lista de películas de TMDB según filtros (género, año, estudio, popularidad).
+
+    `filters` son parámetros de /discover/movie (ej. with_genres, with_companies,
+    primary_release_date.gte, sort_by). Devuelve resultados ya normalizados."""
+    if not configured():
+        return []
+    params = {
+        "api_key": _key(),
+        "language": _lang(),
+        "include_adult": "false",
+        "sort_by": "popularity.desc",
+        "vote_count.gte": 100,
+        "page": 1,
+    }
+    params.update(filters or {})
+    try:
+        r = requests.get(f"{BASE}/discover/movie", params=params, timeout=8)
+        r.raise_for_status()
+        results = r.json().get("results", [])
+    except requests.RequestException:
+        return []
+    out = []
+    for x in results[:limit]:
+        norm = _normalize(x, "movie")
+        if norm.get("tmdb_id") and norm.get("title"):
+            out.append(norm)
+    return out
+
+
 def collection_details(collection_id):
     """Partes de una saga/coleccion de TMDB para saber que falta."""
     if not configured() or not collection_id:

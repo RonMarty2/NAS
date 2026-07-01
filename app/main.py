@@ -782,6 +782,7 @@ def catalog_page(request: Request):
         "tab_counts": db.pending_counts(),
         **_base_context(),
         "catalog": catalog.build_catalog(),
+        "discover": catalog.build_discover(),
         "suggested_roots": catalog.suggested_roots(),
         "dedup_running": bool(dedup_notice.get("running")),
         "delete_dup_running": bool(delete_dup_notice.get("running")),
@@ -879,6 +880,7 @@ def _start_catalog_update(limit):
                 })
 
             result = catalog.update_catalog(limit=limit, progress=push)
+            catalog.update_discover(limit=len(catalog.DISCOVER_SECTIONS), progress=push)
             catalog.invalidate_build()
             catalog.set_status({
                 "running": False,

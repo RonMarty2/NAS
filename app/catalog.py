@@ -228,6 +228,104 @@ def _build_catalog_uncached():
     }
 
 
+# Secciones de "Descubre": género, década, estudio y populares/taquilleras.
+# Cada una es una consulta a /discover de TMDB, cacheada mucho tiempo (cambian poco).
+DISCOVER_SECTIONS = [
+    # Populares / taquilleras / mejor valoradas
+    {"key": "pop:popular",   "group": "Populares",  "title": "Más populares",      "filters": {"sort_by": "popularity.desc"}},
+    {"key": "pop:revenue",   "group": "Populares",  "title": "Más taquilleras",    "filters": {"sort_by": "revenue.desc"}},
+    {"key": "pop:top",       "group": "Populares",  "title": "Mejor valoradas",    "filters": {"sort_by": "vote_average.desc", "vote_count.gte": 2000}},
+    # Por género (ids de TMDB)
+    {"key": "genre:28",   "group": "Géneros", "title": "Acción",           "filters": {"with_genres": "28"}},
+    {"key": "genre:12",   "group": "Géneros", "title": "Aventura",         "filters": {"with_genres": "12"}},
+    {"key": "genre:16",   "group": "Géneros", "title": "Animación",        "filters": {"with_genres": "16"}},
+    {"key": "genre:35",   "group": "Géneros", "title": "Comedia",          "filters": {"with_genres": "35"}},
+    {"key": "genre:27",   "group": "Géneros", "title": "Terror",           "filters": {"with_genres": "27"}},
+    {"key": "genre:878",  "group": "Géneros", "title": "Ciencia ficción",  "filters": {"with_genres": "878"}},
+    {"key": "genre:18",   "group": "Géneros", "title": "Drama",            "filters": {"with_genres": "18"}},
+    {"key": "genre:53",   "group": "Géneros", "title": "Suspenso",         "filters": {"with_genres": "53"}},
+    {"key": "genre:10751", "group": "Géneros", "title": "Familia",         "filters": {"with_genres": "10751"}},
+    # Por década
+    {"key": "decade:2020", "group": "Décadas", "title": "De los 2020s", "filters": {"primary_release_date.gte": "2020-01-01", "primary_release_date.lte": "2029-12-31", "sort_by": "revenue.desc"}},
+    {"key": "decade:2010", "group": "Décadas", "title": "De los 2010s", "filters": {"primary_release_date.gte": "2010-01-01", "primary_release_date.lte": "2019-12-31", "sort_by": "revenue.desc"}},
+    {"key": "decade:2000", "group": "Décadas", "title": "De los 2000s", "filters": {"primary_release_date.gte": "2000-01-01", "primary_release_date.lte": "2009-12-31", "sort_by": "revenue.desc"}},
+    {"key": "decade:1990", "group": "Décadas", "title": "De los 90s",   "filters": {"primary_release_date.gte": "1990-01-01", "primary_release_date.lte": "1999-12-31", "sort_by": "revenue.desc"}},
+    {"key": "decade:1980", "group": "Décadas", "title": "De los 80s",   "filters": {"primary_release_date.gte": "1980-01-01", "primary_release_date.lte": "1989-12-31", "sort_by": "revenue.desc"}},
+    # Por estudio (ids de compañía de TMDB)
+    {"key": "studio:420", "group": "Estudios", "title": "Marvel Studios",   "filters": {"with_companies": "420"}},
+    {"key": "studio:174", "group": "Estudios", "title": "Warner Bros.",     "filters": {"with_companies": "174"}},
+    {"key": "studio:3",   "group": "Estudios", "title": "Pixar",            "filters": {"with_companies": "3"}},
+    {"key": "studio:33",  "group": "Estudios", "title": "Universal",        "filters": {"with_companies": "33"}},
+    {"key": "studio:2",   "group": "Estudios", "title": "Walt Disney",      "filters": {"with_companies": "2"}},
+]
+DISCOVER_TTL_SECONDS = 7 * 24 * 60 * 60
+
+
+def owned_movie_ids():
+    """Conjunto de tmdb_id de películas que el usuario ya tiene."""
+    return {_int(e["tmdb_id"]) for e in owned_movie_entries() if _int(e["tmdb_id"])}
+
+
+def build_discover():
+    """Arma las secciones de 'Descubre' desde la cache (sin llamar a la red).
+
+    Marca cuáles tienes y cuáles te faltan. Devuelve grupos ordenados."""
+    owned = owned_movie_ids()
+    keys = [f"discover:{s['key']}" for s in DISCOVER_SECTIONS]
+    cached = db.get_catalog_cache_many(keys)
+    groups = {}
+    any_cached = False
+    for spec in DISCOVER_SECTIONS:
+        movies = _json_from_row(cached.get(f"discover:{spec['key']}")) or []
+        if not movies:
+            continue
+        any_cached = True
+        cards = []
+        for m in movies:
+            tmdb_id = _int(m.get("tmdb_id"))
+            cards.append({
+                "tmdb_id": tmdb_id,
+                "title": m.get("title") or "",
+                "year": m.get("year"),
+                "poster_url": m.get("poster_url"),
+                "owned": tmdb_id in owned,
+            })
+        owned_count = sum(1 for c in cards if c["owned"])
+        groups.setdefault(spec["group"], []).append({
+            "title": spec["title"],
+            "movies": cards,
+            "owned_count": owned_count,
+            "missing_count": len(cards) - owned_count,
+        })
+    ordered = []
+    for group_name in ["Populares", "Géneros", "Décadas", "Estudios"]:
+        if groups.get(group_name):
+            ordered.append({"name": group_name, "sections": groups[group_name]})
+    return {"groups": ordered, "any_cached": any_cached}
+
+
+def update_discover(limit=20, progress=None):
+    """Descarga/actualiza las secciones de Descubre que estén vencidas o falten.
+
+    Bounded por `limit` consultas por ejecución para no castigar el NAS."""
+    if not tmdb.configured():
+        return {"done": 0, "message": "Falta configurar la API key de TMDB."}
+    done = 0
+    for spec in DISCOVER_SECTIONS:
+        if done >= limit:
+            break
+        cache_key = f"discover:{spec['key']}"
+        if not _cache_stale_ttl(cache_key, DISCOVER_TTL_SECONDS):
+            continue
+        movies = tmdb.discover_movies(spec["filters"], limit=20)
+        if movies:
+            _set_json(cache_key, movies)
+        done += 1
+        if progress:
+            progress({"done": done, "total": len(DISCOVER_SECTIONS), "current": spec["title"]})
+    return {"done": done, "message": f"Descubre actualizado: {done} lista(s)."}
+
+
 def import_folder(root, enrich_limit=80, progress=None):
     """Importa una carpeta existente de biblioteca bajo demanda.
 
@@ -511,6 +609,10 @@ def _set_json(cache_key, value):
 
 
 def _cache_stale(cache_key):
+    return _cache_stale_ttl(cache_key, CACHE_TTL_SECONDS)
+
+
+def _cache_stale_ttl(cache_key, ttl_seconds):
     row = db.get_catalog_cache(cache_key)
     if not row:
         return True
@@ -518,7 +620,7 @@ def _cache_stale(cache_key):
         updated_at = float(row["updated_at"] or 0)
     except (TypeError, ValueError):
         updated_at = 0
-    return (time.time() - updated_at) > CACHE_TTL_SECONDS
+    return (time.time() - updated_at) > ttl_seconds
 
 
 def _int(value):

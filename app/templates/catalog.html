@@ -60,10 +60,11 @@
     </section>
 
     {% if catalog.collections %}
-      <section class="album-section" data-album-section>
+      <section class="album-section" data-album-section id="sagasSection">
         <div class="album-section-head">
           <h2>Sagas</h2>
           <span>{{ catalog.collections|length }} colecciones</span>
+          <button type="button" class="btn btn-secondary album-only-missing" onclick="toggleOnlyMissing(this)">Ver solo las que faltan</button>
         </div>
         <div class="album-saga-grid">
           {% for saga in catalog.collections %}
@@ -163,6 +164,40 @@
       </section>
     {% endif %}
 
+    {% if discover and discover.groups %}
+      {% for group in discover.groups %}
+        <section class="album-section" data-album-section>
+          <div class="album-section-head">
+            <h2>Descubre · {{ group.name }}</h2>
+          </div>
+          {% for sec in group.sections %}
+            <div class="discover-row">
+              <div class="discover-row-head">
+                <h3>{{ sec.title }}</h3>
+                <span>{% if sec.missing_count %}te faltan {{ sec.missing_count }}{% else %}las tienes todas{% endif %}</span>
+              </div>
+              <div class="album-movie-grid discover-grid">
+                {% for movie in sec.movies %}
+                  <article class="album-movie {{ 'owned' if movie.owned else 'missing' }}" data-album-card>
+                    <div class="album-movie-poster">
+                      {% if movie.poster_url %}
+                        <img src="{{ movie.poster_url }}" alt="" loading="lazy">
+                      {% else %}
+                        <div class="album-poster-empty">Sin imagen</div>
+                      {% endif %}
+                      <span class="discover-badge {{ 'ok' if movie.owned else 'warn' }}">{{ 'La tienes' if movie.owned else 'Falta' }}</span>
+                    </div>
+                    <strong>{{ movie.title }}</strong>
+                    <small>{{ movie.year or "" }}</small>
+                  </article>
+                {% endfor %}
+              </div>
+            </div>
+          {% endfor %}
+        </section>
+      {% endfor %}
+    {% endif %}
+
     {% if catalog.companies %}
       <section class="album-section">
         <div class="album-section-head">
@@ -251,5 +286,21 @@
       input.addEventListener("input", function () { applySearch(true); });
       applySearch(false);
     })();
+
+    // Botón "Ver solo las que faltan": en las sagas oculta las películas que ya
+    // tienes (y las sagas completas), para ver de un vistazo lo que te falta.
+    function toggleOnlyMissing(btn) {
+      var section = document.getElementById("sagasSection");
+      if (!section) return;
+      var on = section.classList.toggle("only-missing");
+      section.querySelectorAll(".album-part.owned").forEach(function (el) {
+        el.style.display = on ? "none" : "";
+      });
+      section.querySelectorAll(".album-saga").forEach(function (card) {
+        var hasMissing = card.querySelector(".album-part.missing");
+        card.style.display = (on && !hasMissing) ? "none" : "";
+      });
+      btn.textContent = on ? "Ver todas" : "Ver solo las que faltan";
+    }
   </script>
 {% endblock %}
