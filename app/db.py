@@ -336,6 +336,40 @@ def update_catalog_file(path, **fields):
         conn.execute(f"UPDATE catalog_files SET {cols} WHERE path=?", vals)
 
 
+def update_catalog_files_bulk(paths, **fields):
+    """Actualiza los mismos campos en MUCHAS filas en una sola transacción.
+
+    Corregir una serie de 276 episodios hacía 276 escrituras separadas (una
+    conexión+transacción cada una): minutos en un NAS modesto y el navegador
+    parecía colgado. En lote es una sola transacción (<1s)."""
+    allowed = {"media_type", "tmdb_id", "title", "year", "poster_url", "overview",
+               "quality", "langs", "missing", "source", "match_attempts", "season", "episode"}
+    data = {k: v for k, v in fields.items() if k in allowed}
+    paths = list(paths)
+    if not data or not paths:
+        return 0
+    cols = ", ".join(f"{k}=?" for k in data)
+    vals = list(data.values())
+    with _lock, get_conn() as conn:
+        conn.executemany(
+            f"UPDATE catalog_files SET {cols} WHERE path=?",
+            [(*vals, p) for p in paths],
+        )
+    return len(paths)
+
+
+def bump_catalog_match_attempts(paths):
+    """Suma 1 al contador de intentos de muchas filas, en una sola transacción."""
+    paths = list(paths)
+    if not paths:
+        return
+    with _lock, get_conn() as conn:
+        conn.executemany(
+            "UPDATE catalog_files SET match_attempts=COALESCE(match_attempts,0)+1 WHERE path=?",
+            [(p,) for p in paths],
+        )
+
+
 def delete_catalog_file(path):
     with _lock, get_conn() as conn:
         conn.execute("DELETE FROM catalog_files WHERE path=?", (path,))

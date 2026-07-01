@@ -375,14 +375,14 @@ def apply_manual_match(path, tmdb_id, media_type):
                       title=detail.get("title"), year=detail.get("year"),
                       poster_url=detail.get("poster_url"), overview=detail.get("overview"),
                       match_attempts=0)
-        updated = 0
+        targets = []
         for r in db.list_catalog_files(missing=False):
             if r["media_type"] != "series":
                 continue
             r_root = r["import_root"] or _nearest_root(r["path"]) or os.path.dirname(r["path"])
             if r_root == root and _series_top_folder(r["path"], r_root).lower() == folder:
-                db.update_catalog_file(r["path"], **fields)
-                updated += 1
+                targets.append(r["path"])
+        updated = db.update_catalog_files_bulk(targets, **fields)
         invalidate_build()
         return True, f"Actualizado a: {detail.get('title')} ({detail.get('year') or 's/f'}) — {updated} episodio(s) de la serie."
     else:
@@ -509,19 +509,18 @@ def _nearest_root(path):
     importaron antes de que existiera ese campo, o un re-escaneo los saltó por
     no haber cambiado). Sin esto, cada archivo caía en SU PROPIA carpeta exacta
     y una biblioteca de 200 películas se veía como 200 secciones sueltas."""
-    try:
-        rp = os.path.realpath(path)
-    except (OSError, TypeError):
+    # Comparación textual (sin realpath): esto se llama por CADA archivo del
+    # catálogo al agrupar/corregir, y realpath toca el disco en cada llamada —
+    # miles de accesos por pasada en un NAS modesto. Las rutas del catálogo
+    # se guardan tal como se escanearon, así que el prefijo textual basta.
+    if not path:
         return None
     best = None
     for root in _catalog_roots():
-        try:
-            rr = os.path.realpath(root)
-        except (OSError, TypeError):
-            continue
-        if rp == rr or rp.startswith(rr + os.sep):
-            if best is None or len(rr) > len(best):
-                best = rr
+        rt = (root or "").rstrip("/\\")
+        if rt and (path == rt or path.startswith(rt + os.sep)):
+            if best is None or len(rt) > len(best):
+                best = rt
     return best
 
 
@@ -824,12 +823,11 @@ def enrich_unmatched_series(limit=None, progress=None):
         if votes:
             best_id, best = max(votes.items(), key=lambda kv: kv[1]["count"])
             src = best["row"]
-            for row in rows:
-                db.update_catalog_file(row["path"], tmdb_id=best_id, media_type="series",
-                                        title=src["title"], year=src["year"],
-                                        poster_url=src["poster_url"], overview=src["overview"],
-                                        match_attempts=0)
-                matched += 1
+            matched += db.update_catalog_files_bulk(
+                [row["path"] for row in rows],
+                tmdb_id=best_id, media_type="series", title=src["title"],
+                year=src["year"], poster_url=src["poster_url"],
+                overview=src["overview"], match_attempts=0)
             if progress:
                 progress({"done": i + 1, "total": total, "current": group["folder"]})
             continue
@@ -847,22 +845,18 @@ def enrich_unmatched_series(limit=None, progress=None):
             except Exception:
                 match = None
         if not match:
-            for row in rows_retryable:
-                db.update_catalog_file(row["path"], match_attempts=(row["match_attempts"] or 0) + 1)
+            db.bump_catalog_match_attempts([row["path"] for row in rows_retryable])
         else:
             if _cache_stale(f"series:{match['tmdb_id']}"):
                 detail = tmdb.tv_details(match["tmdb_id"])
                 if detail:
                     _set_json(f"series:{match['tmdb_id']}", detail)
-            for row in rows:
-                db.update_catalog_file(row["path"], **{
-                    "tmdb_id": match["tmdb_id"],
-                    "title": match["title"] or query,
-                    "year": match["year"] or row["year"],
-                    "poster_url": match["poster_url"],
-                    "overview": match["overview"],
-                })
-                matched += 1
+            matched += db.update_catalog_files_bulk(
+                [row["path"] for row in rows],
+                tmdb_id=match["tmdb_id"], media_type="series",
+                title=match["title"] or query, year=match["year"],
+                poster_url=match["poster_url"], overview=match["overview"],
+                match_attempts=0)
         if progress:
             progress({"done": i + 1, "total": total, "current": group["folder"]})
     return matched
