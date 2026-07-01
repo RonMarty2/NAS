@@ -471,30 +471,44 @@ def build_by_folder(catalog_rows=None):
         g = groups.setdefault(root, {"root": root, "name": os.path.basename(root.rstrip("/\\")) or root, "items": []})
 
         if row["media_type"] == "series":
-            # Para agrupar sin tmdb_id, la carpeta que contiene el episodio es
-            # mucho más confiable que el título adivinado del nombre del
-            # archivo (que puede variar de un episodio a otro con nombres
-            # desordenados, p.ej. "S01E02" solo). Casi siempre todos los
-            # episodios de una serie viven en la misma carpeta.
-            folder_key = os.path.basename(os.path.dirname(row["path"]).rstrip("/\\"))
-            key = (root, _int(row["tmdb_id"]) or folder_key.lower() or (row["title"] or row["filename"]).lower())
+            # Agrupamos SIEMPRE por la carpeta principal de la serie (la
+            # primera carpeta después de la raíz escaneada): es como el
+            # usuario organiza su disco y no depende ni del tmdb_id ni del
+            # título adivinado. Antes se agrupaba por tmdb_id y, si episodios
+            # de la MISMA carpeta recibían ids distintos (o unos sí y otros
+            # no), la misma serie salía repetida ('Malcolm' x3). Y agrupar por
+            # la carpeta inmediata fallaba con series donde cada episodio vive
+            # en su propia subcarpeta ('Serie/S01E02/cap.mkv').
+            series_folder = _series_top_folder(row["path"], root)
+            key = (root, series_folder.lower())
             card = series_by_group.get(key)
             if not card:
                 card = {
-                    "tmdb_id": _int(row["tmdb_id"]),
-                    "title": row["title"] or folder_key or "Serie",
-                    "year": row["year"],
-                    "poster_url": row["poster_url"],
+                    "tmdb_id": 0,
+                    "title": series_folder or "Serie",
+                    "year": None,
+                    "poster_url": None,
                     "media_type": "series",
                     "quality": row["quality"] or "",
                     "langs": row["langs"] or "",
                     "episode_count": 0,
+                    "_tmdb_votes": {},
                 }
                 series_by_group[key] = card
                 g["items"].append(card)
             card["episode_count"] += 1
-            if not card["poster_url"] and row["poster_url"]:
-                card["poster_url"] = row["poster_url"]
+            # Los episodios reconocidos "votan": al final la tarjeta muestra
+            # el título/póster del match MÁS FRECUENTE del grupo (así un solo
+            # episodio mal identificado no renombra la serie entera).
+            tmdb_id = _int(row["tmdb_id"])
+            if tmdb_id:
+                vote = card["_tmdb_votes"].setdefault(tmdb_id, {
+                    "count": 0, "title": row["title"], "year": row["year"],
+                    "poster_url": row["poster_url"],
+                })
+                vote["count"] += 1
+                if not vote["poster_url"] and row["poster_url"]:
+                    vote["poster_url"] = row["poster_url"]
             continue
 
         g["items"].append({
@@ -509,6 +523,17 @@ def build_by_folder(catalog_rows=None):
             "episode_count": None,
         })
 
+    # Resuelve los "votos" de cada tarjeta de serie: el match de TMDB más
+    # frecuente entre sus episodios decide título/año/póster de la tarjeta.
+    for card in series_by_group.values():
+        votes = card.pop("_tmdb_votes", {})
+        if votes:
+            best_id, best = max(votes.items(), key=lambda kv: kv[1]["count"])
+            card["tmdb_id"] = best_id
+            card["title"] = best["title"] or card["title"]
+            card["year"] = best["year"]
+            card["poster_url"] = best["poster_url"]
+
     sections = []
     for g in groups.values():
         g["items"].sort(key=lambda m: ((m["title"] or "").lower(), m["year"] or 0))
@@ -516,6 +541,22 @@ def build_by_folder(catalog_rows=None):
         sections.append(g)
     sections.sort(key=lambda s: s["name"].lower())
     return sections
+
+
+def _series_top_folder(path, root):
+    """Primera carpeta después de la raíz escaneada: la carpeta 'de la serie'.
+
+    /v/series/Malcolm/Season 2/cap.mkv con raíz /v/series -> 'Malcolm'.
+    Si el archivo está directamente en la raíz (sin subcarpeta), usa el nombre
+    del archivo sin extensión como último recurso."""
+    try:
+        rel = os.path.relpath(path, root)
+    except ValueError:
+        rel = ""
+    parts = [p for p in rel.replace("\\", "/").split("/") if p and p != "."]
+    if rel.startswith("..") or len(parts) < 2:
+        return os.path.splitext(os.path.basename(path))[0]
+    return parts[0]
 
 
 def _human_size(n):
