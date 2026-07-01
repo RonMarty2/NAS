@@ -325,6 +325,13 @@
 
     </div>
     <div id="catalogTabFolders" class="catalog-tab-panel" hidden>
+    {% if catalog_running %}
+      <div class="target-warning">
+        <strong>Importación en curso</strong>
+        <span>Mientras escanea, los conteos por carpeta pueden verse incompletos (archivos que aún no ha vuelto a revisar en esta pasada). Espera a que termine y, si algo sigue faltando, pulsa "Actualizar vista".</span>
+      </div>
+    {% endif %}
+
     {% if by_folder %}
       <div class="folder-picker">
         <label for="folderPicker">Ver carpeta</label>
