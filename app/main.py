@@ -879,7 +879,7 @@ def _start_catalog_update(limit):
                     "current": update.get("current", ""),
                 })
 
-            enriched = catalog.enrich_unmatched(limit=max(40, limit), progress=push)
+            enriched = catalog.enrich_unmatched(limit=None, progress=push)  # completa todo
             result = catalog.update_catalog(limit=limit, progress=push)
             catalog.update_discover(limit=len(catalog.DISCOVER_SECTIONS), progress=push)
             catalog.invalidate_build()
