@@ -748,47 +748,62 @@ def enrich_unmatched(limit=None, progress=None):
 
 
 def enrich_unmatched_series(limit=None, progress=None):
-    """Igual que enrich_unmatched pero para SERIES: intenta reconocer contra
-    TMDB los episodios importados que quedaron sin tmdb_id (aparecen en
-    'Series por reconocer'). Sin esto, esos episodios se quedaban sin
-    reintentarse nunca, y su progreso de temporadas no contaba (aunque el
-    usuario sí tuviera esos capítulos)."""
+    """Reintenta reconocer en TMDB las SERIES importadas sin tmdb_id.
+
+    Agrupa los episodios por su carpeta de serie y hace UNA sola búsqueda por
+    serie, aplicando el resultado a todos sus episodios. Antes buscaba por
+    episodio: una serie con 147 capítulos sin reconocer disparaba 147
+    búsquedas idénticas (lento y castiga la red del NAS). Devuelve cuántos
+    episodios quedaron reconocidos."""
     if not tmdb.configured():
         return 0
-    pendientes = [
-        row for row in db.list_catalog_files(missing=False)
-        if row["media_type"] == "series" and not _int(row["tmdb_id"])
-        and (row["match_attempts"] or 0) < MAX_MATCH_ATTEMPTS
-    ]
+    # Agrupar pendientes por (raíz, carpeta de la serie).
+    groups = {}
+    for row in db.list_catalog_files(missing=False):
+        if row["media_type"] != "series" or _int(row["tmdb_id"]):
+            continue
+        if (row["match_attempts"] or 0) >= MAX_MATCH_ATTEMPTS:
+            continue
+        root = row["import_root"] or _nearest_root(row["path"]) or os.path.dirname(row["path"])
+        folder = _series_top_folder(row["path"], root)
+        groups.setdefault((root, folder.lower()), {"folder": folder, "rows": []})["rows"].append(row)
+
+    series_list = list(groups.values())
     if limit:
-        pendientes = pendientes[:int(limit)]
-    total = len(pendientes)
+        series_list = series_list[:int(limit)]
+    total = len(series_list)
     matched = 0
-    for i, row in enumerate(pendientes):
-        title = _query_title_from_filename(row["filename"]) or row["title"] or _fallback_title(row["filename"])
+    for i, group in enumerate(series_list):
+        rows = group["rows"]
+        # El nombre de la carpeta de la serie es la mejor consulta (estable
+        # para todos los episodios); el del archivo, el respaldo.
+        query = _query_title_from_filename(group["folder"]) or \
+            _query_title_from_filename(rows[0]["filename"]) or (rows[0]["title"] or "")
         match = None
-        if title:
+        if query:
             try:
-                match = tmdb.best_match(title, "series", row["year"])
+                match = tmdb.best_match(query, "series", rows[0]["year"])
             except Exception:
                 match = None
         if not match:
-            db.update_catalog_file(row["path"], match_attempts=(row["match_attempts"] or 0) + 1)
+            for row in rows:
+                db.update_catalog_file(row["path"], match_attempts=(row["match_attempts"] or 0) + 1)
         else:
-            db.update_catalog_file(row["path"], **{
-                "tmdb_id": match["tmdb_id"],
-                "title": match["title"] or title,
-                "year": match["year"] or row["year"],
-                "poster_url": match["poster_url"],
-                "overview": match["overview"],
-            })
-            matched += 1
             if _cache_stale(f"series:{match['tmdb_id']}"):
                 detail = tmdb.tv_details(match["tmdb_id"])
                 if detail:
                     _set_json(f"series:{match['tmdb_id']}", detail)
-        if progress and i % 10 == 0:
-            progress({"done": i + 1, "total": total, "current": title or ""})
+            for row in rows:
+                db.update_catalog_file(row["path"], **{
+                    "tmdb_id": match["tmdb_id"],
+                    "title": match["title"] or query,
+                    "year": match["year"] or row["year"],
+                    "poster_url": match["poster_url"],
+                    "overview": match["overview"],
+                })
+                matched += 1
+        if progress:
+            progress({"done": i + 1, "total": total, "current": group["folder"]})
     return matched
 
 

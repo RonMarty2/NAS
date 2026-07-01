@@ -5,7 +5,7 @@ import re
 import shutil
 import subprocess
 
-from guessit import guessit
+from .identify import guessit_safe
 
 
 _LANG_ALIASES = {
@@ -162,10 +162,9 @@ def media_is_readable(path):
 
 def _from_filename(filename):
     data = {}
-    try:
-        guessed = guessit(filename)
-    except Exception:
-        guessed = {}
+    # guessit con límite de tiempo: era la última llamada sin proteger contra
+    # nombres de archivo que la cuelguen (ver identify._run_guarded).
+    guessed = guessit_safe(filename)
 
     screen = _text(guessed.get("screen_size"))
     source = _text(guessed.get("source"))

@@ -127,6 +127,12 @@ def identify_safe(path):
     return _run_guarded(identify, path, fallback=dict(_IDENTIFY_FALLBACK))
 
 
+def guessit_safe(filename):
+    """guessit() con el mismo límite de tiempo de seguridad. Para cualquier
+    módulo que necesite el dict crudo de guessit sin riesgo de colgarse."""
+    return _run_guarded(guessit, filename, fallback={}) or {}
+
+
 def tech_info_safe(filename):
     """Igual que tech_info(), con el mismo límite de tiempo de seguridad."""
     result = _run_guarded(tech_info, filename, fallback=("", ""))
