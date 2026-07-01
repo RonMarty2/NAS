@@ -33,6 +33,10 @@
           </label>
           <button class="btn btn-secondary" type="submit" {% if catalog_running %}disabled{% endif %}>Actualizar datos</button>
         </form>
+
+        <form method="post" action="/catalog/retry-unmatched" class="album-form album-form-small" title="Si algo nunca se reconoció (agotó sus intentos), esto le da una oportunidad más. Después pulsa 'Actualizar datos'.">
+          <button class="btn btn-secondary" type="submit" {% if catalog_running %}disabled{% endif %}>🔁 Reintentar lo que falló</button>
+        </form>
       </div>
     </section>
 

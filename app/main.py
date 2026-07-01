@@ -819,6 +819,22 @@ def catalog_refresh():
     return RedirectResponse("/catalog", status_code=303)
 
 
+@app.post("/catalog/retry-unmatched")
+def catalog_retry_unmatched():
+    """Reinicia los intentos de TMDB agotados para lo que sigue sin reconocer.
+
+    Útil tras una mejora en la búsqueda: lo que falló antes se había quedado
+    sin reintentar nunca (para no gastar cupo en algo ya descartado). No
+    vuelve a consultar TMDB por sí solo: pulsa 'Actualizar datos' después."""
+    db.reset_catalog_match_attempts()
+    catalog.invalidate_build()
+    catalog.set_status({
+        "running": False,
+        "message": "Listo. Pulsa 'Actualizar datos' para reintentar lo que antes no se reconoció.",
+    })
+    return RedirectResponse("/catalog", status_code=303)
+
+
 @app.post("/catalog/import")
 def catalog_import(folder: str = Form(""), limit: int = Form(80)):
     started = _start_catalog_import(folder, limit)

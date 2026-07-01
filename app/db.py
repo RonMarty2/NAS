@@ -498,3 +498,13 @@ def reset_match_attempts():
     guardar ajustes (p.ej. al poner la API key) para que se vuelva a intentar."""
     with _lock, get_conn() as conn:
         conn.execute("UPDATE items SET match_attempts=0 WHERE status='pending'")
+
+
+def reset_catalog_match_attempts():
+    """Reinicia el contador de intentos de TMDB del Catálogo (solo lo que sigue
+    sin reconocer). Útil tras mejorar la lógica de búsqueda: lo que falló con
+    la lógica vieja se había quedado sin reintentar nunca más."""
+    with _lock, get_conn() as conn:
+        conn.execute(
+            "UPDATE catalog_files SET match_attempts=0 WHERE tmdb_id IS NULL AND match_attempts>0"
+        )
