@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="album-page">
+    <section class="album-hero">
+      <div class="album-title">
+        <span class="album-kicker">Deseos</span>
+        <h1>Lista de deseos</h1>
+        <p>Películas y series que quieres conseguir. Se quitan solas de la lista en cuanto las descargas.</p>
+      </div>
+    </section>
+
+    {% if not tmdb_configured %}
+      <div class="target-warning target-warning-strong">
+        <strong>Falta TMDB</strong>
+        <span>Configura la API key de TMDB en Ajustes para poder buscar y agregar deseos.</span>
+      </div>
+    {% endif %}
+
+    <section class="album-search">
+      <label for="wishSearch">Buscar en TMDB para agregar</label>
+      <form method="get" action="/wishlist" class="album-search-row">
+        <input id="wishSearch" type="search" name="q" value="{{ q }}" placeholder="Título de película o serie" autocomplete="off">
+        <select name="media_type" class="album-limit">
+          <option value="movie" {% if media_type == "movie" %}selected{% endif %}>Película</option>
+          <option value="series" {% if media_type == "series" %}selected{% endif %}>Serie</option>
+        </select>
+        <button class="btn btn-primary" type="submit">Buscar</button>
+      </form>
+    </section>
+
+    {% if results %}
+      <section class="album-section">
+        <div class="album-section-head">
+          <h2>Resultados</h2>
+        </div>
+        <div class="album-movie-grid">
+          {% for r in results %}
+            <article class="album-movie">
+              <div class="album-movie-poster">
+                {% if r.poster_url %}<img src="{{ r.poster_url }}" alt="" loading="lazy">{% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
+              </div>
+              <strong>{{ r.title }}</strong>
+              <small>{{ r.year or "" }}</small>
+              {% if r.tmdb_id in existing_ids %}
+                <span class="album-chip ok">Ya en tu lista</span>
+              {% else %}
+                <form method="post" action="/wishlist/add">
+                  <input type="hidden" name="tmdb_id" value="{{ r.tmdb_id }}">
+                  <input type="hidden" name="media_type" value="{{ media_type }}">
+                  <input type="hidden" name="title" value="{{ r.title }}">
+                  <input type="hidden" name="year" value="{{ r.year or '' }}">
+                  <input type="hidden" name="poster_url" value="{{ r.poster_url or '' }}">
+                  <input type="hidden" name="overview" value="{{ r.overview or '' }}">
+                  <input type="hidden" name="q" value="{{ q }}">
+                  <button type="submit" class="btn btn-secondary">➕ Agregar</button>
+                </form>
+              {% endif %}
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    {% elif q %}
+      <section class="album-empty">
+        <h2>Sin resultados</h2>
+        <p>Prueba con otro título.</p>
+      </section>
+    {% endif %}
+
+    <section class="album-section">
+      <div class="album-section-head">
+        <h2>Mi lista</h2>
+        <span>{{ items|length }} pendiente(s)</span>
+      </div>
+      {% if items %}
+        <div class="album-movie-grid">
+          {% for item in items %}
+            <article class="album-movie">
+              <div class="album-movie-poster">
+                {% if item.poster_url %}<img src="{{ item.poster_url }}" alt="" loading="lazy">{% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
+              </div>
+              <strong>{{ item.title }}</strong>
+              <small>{{ item.year or "" }}{% if item.media_type == "series" %} · Serie{% endif %}</small>
+              <form method="post" action="/wishlist/remove">
+                <input type="hidden" name="item_id" value="{{ item.id }}">
+                <button type="submit" class="btn btn-secondary">Quitar</button>
+              </form>
+            </article>
+          {% endfor %}
+        </div>
+      {% else %}
+        <div class="album-empty">
+          <h2>Tu lista está vacía</h2>
+          <p>Busca arriba y agrega lo que quieras conseguir.</p>
+        </div>
+      {% endif %}
+    </section>
+  </div>
+{% endblock %}

@@ -348,6 +348,14 @@ def owned_movie_ids():
     return {_int(e["tmdb_id"]) for e in owned_movie_entries() if _int(e["tmdb_id"])}
 
 
+def owned_series_ids():
+    """Conjunto de tmdb_id de series de las que el usuario ya tiene al menos un episodio."""
+    return {
+        _int(it["tmdb_id"]) for it in db.list_items(status="done", media_type="series")
+        if _int(it["tmdb_id"])
+    }
+
+
 def build_discover():
     """Arma las secciones de 'Descubre' desde la cache (sin llamar a la red).
 

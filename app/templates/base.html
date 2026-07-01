@@ -23,6 +23,8 @@
         <a class="tab {{ 'active' if active == key else '' }}" href="/tab/{{ key }}">{{ label }}{% if tab_counts and tab_counts.get(key) %} <span class="tab-count">{{ tab_counts.get(key) }}</span>{% endif %}</a>
       {% endfor %}
       <a class="tab {{ 'active' if active == 'catalog' else '' }}" href="/catalog">Catálogo</a>
+      <a class="tab {{ 'active' if active == 'wishlist' else '' }}" href="/wishlist">Deseos</a>
+      <a class="tab {{ 'active' if active == 'health' else '' }}" href="/health">Salud</a>
       <a class="tab {{ 'active' if active == 'history' else '' }}" href="/history">Historial</a>
       <a class="tab {{ 'active' if active == 'settings' else '' }}" href="/settings">Ajustes</a>
     </nav>

@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import catalog, config, db, duplicates, filemeta, folders, jellyfin, organizer, targets, watcher
+from . import catalog, config, db, duplicates, filemeta, folders, health, jellyfin, organizer, targets, watcher, wishlist
 from .metadata import music as music_meta
 from .metadata import tmdb
 
@@ -38,6 +38,7 @@ SCAN_LOCK = threading.Lock()
 LOCAL_METADATA_STATUS_KEY = "local_metadata_status"
 LOCAL_METADATA_LOCK = threading.Lock()
 CATALOG_LOCK = threading.Lock()
+HEALTH_LOCK = threading.Lock()
 IO_LOCK = threading.Lock()
 MOVE_QUEUE = queue.Queue()
 MOVE_LOCK = threading.Lock()
@@ -335,11 +336,12 @@ def _activity(scan_notice=None, local_metadata_notice=None, catalog_notice=None)
     processing = db.count_processing()
     counts = db.pending_counts()
 
+    health_notice = health.status()
     active = bool(
         processing
         or dedup.get("running") or delete_dup.get("running")
         or scan_notice.get("running") or local_notice.get("running")
-        or catalog_notice.get("running")
+        or catalog_notice.get("running") or health_notice.get("running")
     )
     sig = "|".join(str(x) for x in [
         processing, sum(counts.values()),
@@ -348,6 +350,7 @@ def _activity(scan_notice=None, local_metadata_notice=None, catalog_notice=None)
         scan_notice.get("running"), scan_notice.get("message"),
         local_notice.get("running"), local_notice.get("done"), local_notice.get("errors"),
         catalog_notice.get("running"), catalog_notice.get("done"), catalog_notice.get("message"),
+        health_notice.get("running"), health_notice.get("message"),
     ])
     return {"active": active, "sig": sig}
 
@@ -920,6 +923,120 @@ def _start_catalog_update(limit):
 
     threading.Thread(target=worker, daemon=True).start()
     return True
+
+
+# ---------------- Salud de la biblioteca ----------------
+
+@app.get("/health", response_class=HTMLResponse)
+def health_page(request: Request):
+    return templates.TemplateResponse(request, "health.html", {
+        "request": request,
+        "tabs": TABS,
+        "active": "health",
+        "page": "health",
+        "tab_counts": db.pending_counts(),
+        **_base_context(),
+        "health_notice": health.status(),
+        "health_running": bool(health.status().get("running")),
+        "result": health.last_result(),
+    })
+
+
+@app.post("/health/scan")
+def health_scan():
+    started = _start_health_scan()
+    if not started:
+        health.set_status({"running": False, "message": "Ya hay un análisis en curso."})
+    return RedirectResponse("/health", status_code=303)
+
+
+def _start_health_scan():
+    if not HEALTH_LOCK.acquire(blocking=False):
+        return False
+    health.set_status({
+        "running": True,
+        "message": "Revisando archivos de la biblioteca...",
+        "done": 0,
+        "total": 0,
+        "current": "",
+    })
+
+    def worker():
+        try:
+            def push(update):
+                health.set_status({
+                    "running": True,
+                    "message": "Revisando archivos de la biblioteca...",
+                    "done": update.get("done", 0),
+                    "total": update.get("total", 0),
+                    "current": update.get("current", ""),
+                })
+
+            result = health.run_scan(progress=push)
+            n_broken = len(result.get("broken", []))
+            n_orphans = len(result.get("orphans", []))
+            health.set_status({
+                "running": False,
+                "message": f"Análisis terminado: {n_broken} archivo(s) rotos, {n_orphans} huérfano(s).",
+                "done": result.get("videos_checked", 0),
+                "total": result.get("videos_checked", 0),
+                "current": "",
+            })
+        except Exception as exc:
+            health.set_status({"running": False, "message": f"No se pudo completar el análisis: {exc}"})
+        finally:
+            HEALTH_LOCK.release()
+
+    threading.Thread(target=worker, daemon=True).start()
+    return True
+
+
+@app.post("/health/delete")
+def health_delete(path: str = Form("")):
+    health.delete_broken(path)
+    return RedirectResponse("/health", status_code=303)
+
+
+# ---------------- Lista de deseos ----------------
+
+@app.get("/wishlist", response_class=HTMLResponse)
+def wishlist_page(request: Request, q: str = "", media_type: str = "movie"):
+    media_type = media_type if media_type in ("movie", "series") else "movie"
+    results = wishlist.search(q, media_type) if q.strip() else []
+    existing_ids = {int(r["tmdb_id"]) for r in db.list_wishlist()}
+    return templates.TemplateResponse(request, "wishlist.html", {
+        "request": request,
+        "tabs": TABS,
+        "active": "wishlist",
+        "page": "wishlist",
+        "tab_counts": db.pending_counts(),
+        **_base_context(),
+        "items": wishlist.list_wishlist(),
+        "results": results,
+        "existing_ids": existing_ids,
+        "q": q,
+        "media_type": media_type,
+        "tmdb_configured": tmdb.configured(),
+    })
+
+
+@app.post("/wishlist/add")
+def wishlist_add(tmdb_id: int = Form(...), media_type: str = Form("movie"),
+                  title: str = Form(""), year: str = Form(""),
+                  poster_url: str = Form(""), overview: str = Form(""),
+                  q: str = Form("")):
+    try:
+        year_val = int(year) if year.strip() else None
+    except ValueError:
+        year_val = None
+    wishlist.add(tmdb_id, media_type, title, year_val, poster_url or None, overview)
+    return RedirectResponse(f"/wishlist?q={quote(q)}&media_type={media_type}", status_code=303)
+
+
+@app.post("/wishlist/remove")
+def wishlist_remove(item_id: int = Form(...)):
+    wishlist.remove(item_id)
+    return RedirectResponse("/wishlist", status_code=303)
 
 
 @app.get("/history", response_class=HTMLResponse)

@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="album-page">
+    <section class="album-hero">
+      <div class="album-title">
+        <span class="album-kicker">Biblioteca</span>
+        <h1>Salud de la biblioteca</h1>
+        <p>Busca archivos rotos/corruptos y .nfo o pósters huérfanos sin su video. No borra nada solo: tú decides.</p>
+      </div>
+      <div class="album-tools">
+        <form method="post" action="/health/scan" class="album-form album-form-small">
+          <button class="btn btn-primary" type="submit" {% if health_running %}disabled{% endif %}>
+            {% if health_running %}Analizando...{% else %}🩺 Analizar biblioteca{% endif %}
+          </button>
+        </form>
+      </div>
+    </section>
+
+    {% if health_notice and health_notice.visible %}
+      <div class="scan-banner {{ 'running' if health_notice.running else 'done' }}">
+        <strong>{% if health_notice.running %}Analizando{% else %}Análisis terminado{% endif %}</strong>
+        <span>{{ health_notice.message }}</span>
+        {% if health_notice.total %}
+          <progress class="dedup-progress" value="{{ health_notice.done or 0 }}" max="{{ health_notice.total }}"></progress>
+        {% endif %}
+      </div>
+    {% endif %}
+
+    <section class="album-stats" aria-label="Resumen de salud">
+      <div><strong>{{ result.videos_checked or 0 }}</strong><span>videos revisados</span></div>
+      <div><strong>{{ result.broken|length }}</strong><span>archivos rotos</span></div>
+      <div><strong>{{ result.orphans|length }}</strong><span>huérfanos</span></div>
+    </section>
+
+    {% if result.checked_at %}
+      <p class="health-checked-at">Último análisis: {{ result.checked_at }}</p>
+    {% endif %}
+
+    {% if result.broken %}
+      <section class="album-section">
+        <div class="album-section-head">
+          <h2>⚠️ Archivos rotos o corruptos</h2>
+          <span>{{ result.broken|length }} archivo(s)</span>
+        </div>
+        <div class="health-list">
+          {% for item in result.broken %}
+            <div class="health-row">
+              <div class="health-row-info">
+                <strong>{{ item.path.split('/')[-1] }}</strong>
+                <small>{{ item.path }}</small>
+                <small class="missing-text">{{ item.reason }}</small>
+              </div>
+              <form method="post" action="/health/delete" onsubmit="return confirm('¿Borrar este archivo del disco?\n\n{{ item.path }}\n\nEsta acción no se puede deshacer.');">
+                <input type="hidden" name="path" value="{{ item.path }}">
+                <button type="submit" class="btn btn-danger">🗑️ Borrar</button>
+              </form>
+            </div>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    {% if result.orphans %}
+      <section class="album-section">
+        <div class="album-section-head">
+          <h2>🧩 Archivos huérfanos</h2>
+          <span>{{ result.orphans|length }} archivo(s) sin video asociado</span>
+        </div>
+        <div class="health-list">
+          {% for item in result.orphans %}
+            <div class="health-row">
+              <div class="health-row-info">
+                <strong>{{ item.path.split('/')[-1] }}</strong>
+                <small>{{ item.path }}</small>
+                <small>{{ item.reason }}</small>
+              </div>
+              <form method="post" action="/health/delete" onsubmit="return confirm('¿Borrar este archivo del disco?\n\n{{ item.path }}');">
+                <input type="hidden" name="path" value="{{ item.path }}">
+                <button type="submit" class="btn btn-danger">🗑️ Borrar</button>
+              </form>
+            </div>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    {% if result.checked_at and not result.broken and not result.orphans %}
+      <section class="album-empty">
+        <h2>Todo en orden</h2>
+        <p>No se encontraron archivos rotos ni huérfanos en la última revisión.</p>
+      </section>
+    {% endif %}
+
+    {% if not result.checked_at %}
+      <section class="album-empty">
+        <h2>Aún no has analizado tu biblioteca</h2>
+        <p>Pulsa <strong>Analizar biblioteca</strong> para buscar archivos rotos o huérfanos.</p>
+      </section>
+    {% endif %}
+  </div>
+{% endblock %}

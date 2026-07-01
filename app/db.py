@@ -163,6 +163,18 @@ CREATE TABLE IF NOT EXISTS catalog_files (
 
 CREATE INDEX IF NOT EXISTS idx_catalog_files_tmdb ON catalog_files(tmdb_id);
 CREATE INDEX IF NOT EXISTS idx_catalog_files_missing ON catalog_files(missing);
+
+CREATE TABLE IF NOT EXISTS wishlist (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tmdb_id INTEGER NOT NULL,
+    media_type TEXT DEFAULT 'movie',
+    title TEXT,
+    year INTEGER,
+    poster_url TEXT,
+    overview TEXT,
+    added_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(tmdb_id, media_type)
+);
 """
 
 # Columnas añadidas después de la primera versión (migración para BD existentes).
@@ -358,6 +370,27 @@ def mark_catalog_missing_under_root(root, scan_ts):
             "WHERE source='scan' AND last_seen<? AND (" + " OR ".join(clauses) + ")",
             args,
         )
+
+
+# ---------------- Lista de deseos ----------------
+
+def list_wishlist():
+    with get_conn() as conn:
+        return conn.execute("SELECT * FROM wishlist ORDER BY added_at DESC").fetchall()
+
+
+def add_wishlist_item(tmdb_id, media_type, title, year, poster_url, overview):
+    with _lock, get_conn() as conn:
+        conn.execute(
+            "INSERT INTO wishlist(tmdb_id, media_type, title, year, poster_url, overview) "
+            "VALUES(?,?,?,?,?,?) ON CONFLICT(tmdb_id, media_type) DO NOTHING",
+            (tmdb_id, media_type, title, year, poster_url, overview),
+        )
+
+
+def remove_wishlist_item(item_id):
+    with _lock, get_conn() as conn:
+        conn.execute("DELETE FROM wishlist WHERE id=?", (item_id,))
 
 
 # ---------------- Items (cola y historial) ----------------

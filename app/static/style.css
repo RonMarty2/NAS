@@ -713,3 +713,16 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
 .dup-copy-info small { color: var(--album-muted); font-size: .76rem; word-break: break-all; }
 .btn-danger { background: #7a2230; color: #fff; border: 0; white-space: nowrap; }
 .btn-danger:hover { background: #97303f; }
+
+/* --- Salud de la biblioteca --- */
+.health-checked-at { color: var(--album-muted); font-size: .84rem; margin: -.4rem 0 .6rem; }
+.health-list { display: flex; flex-direction: column; gap: .5rem; }
+.health-row {
+  display: flex; align-items: center; justify-content: space-between; gap: .8rem;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 8px; padding: .6rem .8rem;
+}
+.health-row-info { min-width: 0; display: flex; flex-direction: column; }
+.health-row-info strong { font-size: .88rem; }
+.health-row-info small { color: var(--album-muted); font-size: .76rem; word-break: break-all; }
