@@ -87,11 +87,24 @@ def update_catalog(limit=60, progress=None):
     scanned = 0
     collection_ids = set()
 
+    # Una sola lectura de caché para todas las películas (antes eran dos
+    # consultas por película: ~300 conexiones por pasada con 150 pelis).
+    cached = db.get_catalog_cache_many(f"movie:{_int(it['tmdb_id'])}" for it in items)
+
+    def _stale_row(row):
+        if not row:
+            return True
+        try:
+            return (time.time() - float(row["updated_at"] or 0)) > CACHE_TTL_SECONDS
+        except (TypeError, ValueError):
+            return True
+
     for item in items:
         scanned += 1
         tmdb_id = _int(item["tmdb_id"])
-        detail = movie_detail(tmdb_id)
-        if (not detail or _cache_stale(f"movie:{tmdb_id}")) and queries < limit:
+        cache_row = cached.get(f"movie:{tmdb_id}")
+        detail = _json_from_row(cache_row)
+        if (not detail or _stale_row(cache_row)) and queries < limit:
             detail = tmdb.movie_details(tmdb_id)
             if detail:
                 _set_json(f"movie:{tmdb_id}", detail)
@@ -879,6 +892,7 @@ def import_folder(root, enrich_limit=80, progress=None):
     matched = 0
     skipped = 0
     errors = 0
+    touched = []  # archivos sin cambios, se marcan como vistos en lote
     enrich_limit = max(0, int(enrich_limit or 0))
     # Precargamos lo ya catalogado en un dict (una consulta) en vez de una
     # consulta por archivo. En bibliotecas grandes eso evita miles de queries.
@@ -891,7 +905,10 @@ def import_folder(root, enrich_limit=80, progress=None):
             filename = os.path.basename(path)
             changed = not existing or existing["size_bytes"] != stat.st_size or existing["mtime_ns"] != stat.st_mtime_ns
             if existing and not changed and existing["tmdb_id"]:
-                db.touch_catalog_file(path, last_seen=scan_ts, import_root=import_root)
+                touched.append(path)
+                if len(touched) >= 500:  # vaciar por tandas, no una transacción por archivo
+                    db.touch_catalog_files_bulk(touched, scan_ts, import_root)
+                    touched = []
                 skipped += 1
                 continue
             ident = identify.identify_safe(path)
@@ -961,6 +978,8 @@ def import_folder(root, enrich_limit=80, progress=None):
                 })
         except Exception:
             errors += 1
+    if touched:
+        db.touch_catalog_files_bulk(touched, scan_ts, import_root)
     db.mark_catalog_missing_under_root(root, scan_ts)
     return {
         "scanned": scanned,

@@ -1247,8 +1247,8 @@ def _redirect_to_type(media_type):
 CONFLICT_NOTICE = "Ya existe en destino. Compara versiones y elige cual conservar."
 
 
-def _destination_exists(item, dest_folder):
-    return targets.inspect(item, dest_folder)["exact_exists"]
+def _destination_exists(item, dest_folder, _folder_cache=None):
+    return targets.inspect(item, dest_folder, _folder_cache=_folder_cache)["exact_exists"]
 
 
 def _target_detail(item):
@@ -1477,11 +1477,12 @@ def confirm_series(ids: List[int] = Form(...), dest_folder: str = Form(""),
     target = folders.ensure_folder(base, new_subfolder)
     if target is None:
         return _redirect_to_type("series")
+    _folder_cache = {}  # no re-listar la carpeta destino por cada episodio
     for item_id in ids:
         item = db.get_item(item_id)
         if not item or item["status"] != "pending":
             continue
-        if _destination_exists(item, target):
+        if _destination_exists(item, target, _folder_cache=_folder_cache):
             db.update_item(item_id, dest_folder=target, status="pending", error=CONFLICT_NOTICE)
             continue
         db.update_item(item_id, dest_folder=target, status="processing", error=None)

@@ -336,6 +336,23 @@ def update_catalog_file(path, **fields):
         conn.execute(f"UPDATE catalog_files SET {cols} WHERE path=?", vals)
 
 
+def touch_catalog_files_bulk(paths, last_seen, import_root=None):
+    """Como touch_catalog_file pero para MUCHAS rutas en una transacción.
+
+    En un re-escaneo, cada archivo sin cambios se 'tocaba' con su propia
+    transacción: 2400 archivos = 2400 commits (minutos en un NAS modesto).
+    En lote son un puñado de transacciones."""
+    paths = list(paths)
+    if not paths:
+        return
+    with _lock, get_conn() as conn:
+        conn.executemany(
+            "UPDATE catalog_files SET last_seen=?, missing=0, "
+            "import_root=COALESCE(import_root, ?) WHERE path=?",
+            [(last_seen, import_root, p) for p in paths],
+        )
+
+
 def update_catalog_files_bulk(paths, **fields):
     """Actualiza los mismos campos en MUCHAS filas en una sola transacción.
 
