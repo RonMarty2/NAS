@@ -81,16 +81,28 @@ def _disk_usage():
 
 
 def _recently_added(limit=15):
-    return [
-        {
-            "title": it["chosen_title"] or it["detected_title"] or it["filename"],
+    """Últimos movidos, con UNA tarjeta por título: las series no aparecen una
+    vez por episodio (p.ej. 'The Boys' x9), sino una sola vez."""
+    out = []
+    seen = set()
+    # Traemos más de la cuenta y colapsamos por serie/película para llenar el hueco.
+    for it in db.list_recent_done(limit * 8):
+        title = it["chosen_title"] or it["detected_title"] or it["filename"]
+        # Clave: por serie usamos su id/título (no el episodio); pelis por id/título.
+        key = (it["media_type"], it["tmdb_id"] or (title or "").lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({
+            "title": title,
             "year": it["chosen_year"] or it["detected_year"],
             "media_type": it["media_type"],
             "poster_url": it["poster_url"],
             "processed_at": it["processed_at"],
-        }
-        for it in db.list_recent_done(limit)
-    ]
+        })
+        if len(out) >= limit:
+            break
+    return out
 
 
 def build():
