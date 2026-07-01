@@ -249,6 +249,42 @@ def discover_movies(filters, limit=20):
     return out
 
 
+def tv_details(tmdb_id):
+    """Detalle de una serie con sus temporadas (nº de episodios por temporada),
+    para saber qué falta. Una sola consulta por serie."""
+    if not configured() or not tmdb_id:
+        return {}
+    params = {"api_key": _key(), "language": _lang()}
+    try:
+        r = requests.get(f"{BASE}/tv/{tmdb_id}", params=params, timeout=8)
+        r.raise_for_status()
+        data = r.json()
+    except requests.RequestException:
+        return {}
+    date = data.get("first_air_date") or ""
+    seasons = []
+    for s in data.get("seasons") or []:
+        num = s.get("season_number")
+        if num is None or num == 0:
+            continue  # 0 = especiales, no cuenta como temporada regular
+        seasons.append({
+            "season_number": num,
+            "name": s.get("name") or f"Temporada {num}",
+            "episode_count": s.get("episode_count") or 0,
+            "air_date": s.get("air_date") or "",
+            "poster_url": (IMG + s["poster_path"]) if s.get("poster_path") else None,
+        })
+    seasons.sort(key=lambda s: s["season_number"])
+    return {
+        "tmdb_id": data.get("id"),
+        "title": data.get("name") or data.get("original_name") or "",
+        "year": int(date[:4]) if date[:4].isdigit() else None,
+        "poster_url": (IMG + data["poster_path"]) if data.get("poster_path") else None,
+        "overview": data.get("overview") or "",
+        "seasons": seasons,
+    }
+
+
 def collection_details(collection_id):
     """Partes de una saga/coleccion de TMDB para saber que falta."""
     if not configured() or not collection_id:

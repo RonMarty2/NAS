@@ -215,12 +215,15 @@ def _build_catalog_uncached():
     )
     standalone = sorted(standalone, key=lambda m: (m.get("year") or 9999, m.get("title") or ""))
     companies_list = sorted(companies.values(), key=lambda c: (-c["count"], c["name"].lower()))[:18]
+    series_prog, series_uncached = series_progress()
 
     return {
         "collections": collections_list,
         "standalone": standalone[:80],
         "companies": companies_list,
         "series": series[:80],
+        "series_progress": series_prog[:60],
+        "series_uncached": len(series_uncached),
         "owned_total": len(items),
         "imported_total": len(catalog_rows),
         "uncached": uncached,
@@ -512,6 +515,8 @@ def import_folder(root, enrich_limit=80, progress=None):
                 "missing": 0,
                 "source": "scan",
                 "import_root": import_root,  # carpeta que se escaneó (para agrupar)
+                "season": ident.get("season"),
+                "episode": ident.get("episode"),
             }
             if media_type == "movie" and matched < enrich_limit and tmdb.configured():
                 match = tmdb.best_match(fields["title"], "movie", fields["year"])
@@ -531,6 +536,21 @@ def import_folder(root, enrich_limit=80, progress=None):
                             collection_detail = tmdb.collection_details(collection["id"])
                             if collection_detail:
                                 _set_json(f"collection:{collection['id']}", collection_detail)
+                    matched += 1
+            elif media_type == "series" and matched < enrich_limit and tmdb.configured():
+                match = tmdb.best_match(fields["title"], "series", fields["year"])
+                if match:
+                    fields.update({
+                        "tmdb_id": match["tmdb_id"],
+                        "title": match["title"],
+                        "year": match["year"],
+                        "poster_url": match["poster_url"],
+                        "overview": match["overview"],
+                    })
+                    if _cache_stale(f"series:{match['tmdb_id']}"):
+                        detail = tmdb.tv_details(match["tmdb_id"])
+                        if detail:
+                            _set_json(f"series:{match['tmdb_id']}", detail)
                     matched += 1
             db.upsert_catalog_file(
                 path,
@@ -596,11 +616,13 @@ def _within_catalog_roots(path):
 
 
 def _series_entries(catalog_rows=None):
+    """Series SIN tmdb_id (no reconocidas todavía): listado simple sin progreso.
+    Las reconocidas se muestran con progreso de episodios via series_progress()."""
     out = []
     seen = set()
     catalog_rows = db.list_catalog_files(missing=False) if catalog_rows is None else catalog_rows
     for row in catalog_rows:
-        if row["media_type"] != "series":
+        if row["media_type"] != "series" or _int(row["tmdb_id"]):
             continue
         key = (row["title"] or row["filename"]).lower()
         if key in seen:
@@ -616,6 +638,126 @@ def _series_entries(catalog_rows=None):
         })
     out.sort(key=lambda x: (x.get("title") or "").lower())
     return out
+
+
+def series_detail_cached(tmdb_id):
+    return _get_json(f"series:{tmdb_id}") if tmdb_id else None
+
+
+def owned_episode_map():
+    """{tmdb_id: {season_number: {episode_numbers...}}} de lo que ya tienes,
+    combinando lo organizado (items) y lo importado de biblioteca (catalog_files)."""
+    owned = {}
+
+    def _add(tmdb_id, season, episode):
+        tmdb_id = _int(tmdb_id)
+        try:
+            season = int(season)
+            episode = int(episode)
+        except (TypeError, ValueError):
+            return
+        if not tmdb_id:
+            return
+        owned.setdefault(tmdb_id, {}).setdefault(season, set()).add(episode)
+
+    for it in db.list_items(status="done", media_type="series"):
+        _add(it["tmdb_id"], it["season"], it["episode"])
+    for row in db.list_catalog_files(missing=False):
+        if row["media_type"] == "series":
+            _add(row["tmdb_id"], row["season"], row["episode"])
+    return owned
+
+
+def _series_title_poster(tmdb_id, items_by_id, rows_by_id):
+    it = items_by_id.get(tmdb_id)
+    if it:
+        return (it["chosen_title"] or it["detected_title"] or "", it["poster_url"])
+    row = rows_by_id.get(tmdb_id)
+    if row:
+        return (row["title"] or "", row["poster_url"])
+    return ("", None)
+
+
+def series_progress():
+    """Series reconocidas (con tmdb_id) con progreso de episodios por temporada:
+    cuáles tienes y cuáles te faltan. Solo usa la caché (sin llamar a la red)."""
+    episodes = owned_episode_map()
+    items_by_id = {}
+    for it in db.list_items(status="done", media_type="series"):
+        tmdb_id = _int(it["tmdb_id"])
+        if tmdb_id and tmdb_id not in items_by_id:
+            items_by_id[tmdb_id] = it
+    rows_by_id = {}
+    for row in db.list_catalog_files(missing=False):
+        if row["media_type"] != "series":
+            continue
+        tmdb_id = _int(row["tmdb_id"])
+        if tmdb_id and tmdb_id not in rows_by_id:
+            rows_by_id[tmdb_id] = row
+
+    all_ids = set(items_by_id) | set(rows_by_id)
+    cached = db.get_catalog_cache_many(f"series:{tid}" for tid in all_ids)
+
+    out = []
+    uncached_ids = []
+    for tmdb_id in all_ids:
+        detail = _json_from_row(cached.get(f"series:{tmdb_id}"))
+        title, poster = _series_title_poster(tmdb_id, items_by_id, rows_by_id)
+        if not detail:
+            uncached_ids.append(tmdb_id)
+            continue
+        owned_seasons = episodes.get(tmdb_id, {})
+        seasons = []
+        owned_total = 0
+        expected_total = 0
+        for s in detail.get("seasons") or []:
+            num = s["season_number"]
+            have = owned_seasons.get(num, set())
+            total = s.get("episode_count") or 0
+            owned_total += len(have)
+            expected_total += total
+            missing_eps = sorted(set(range(1, total + 1)) - have) if total else []
+            seasons.append({
+                "season_number": num,
+                "name": s.get("name") or f"Temporada {num}",
+                "owned_count": len(have),
+                "total_count": total,
+                "missing_count": max(0, total - len(have)),
+                "missing_episodes": missing_eps,
+                "complete": total > 0 and len(have) >= total,
+            })
+        out.append({
+            "tmdb_id": tmdb_id,
+            "title": detail.get("title") or title,
+            "year": detail.get("year"),
+            "poster_url": detail.get("poster_url") or poster,
+            "seasons": seasons,
+            "owned_total": owned_total,
+            "expected_total": expected_total,
+            "missing_total": max(0, expected_total - owned_total),
+        })
+    out.sort(key=lambda s: (s["missing_total"] == 0, (s["title"] or "").lower()))
+    return out, uncached_ids
+
+
+def update_series_details(limit=40, progress=None):
+    """Descarga/actualiza el detalle (temporadas/episodios) de las series que
+    el usuario ya tiene y aún no tienen caché, o cuya caché venció."""
+    if not tmdb.configured():
+        return 0
+    items_ids = {_int(it["tmdb_id"]) for it in db.list_items(status="done", media_type="series") if _int(it["tmdb_id"])}
+    row_ids = {_int(r["tmdb_id"]) for r in db.list_catalog_files(missing=False) if r["media_type"] == "series" and _int(r["tmdb_id"])}
+    pending = sorted(x for x in (items_ids | row_ids) if _cache_stale(f"series:{x}"))
+    pending = pending[:max(0, int(limit or 0))]
+    done = 0
+    for tmdb_id in pending:
+        detail = tmdb.tv_details(tmdb_id)
+        if detail:
+            _set_json(f"series:{tmdb_id}", detail)
+        done += 1
+        if progress:
+            progress({"done": done, "total": len(pending), "current": detail.get("title", "") if detail else ""})
+    return done
 
 
 def movie_detail(tmdb_id):

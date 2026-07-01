@@ -200,11 +200,63 @@
       </section>
     {% endif %}
 
+    {% if catalog.series_progress %}
+      <section class="album-section" data-album-section id="seriesSection">
+        <div class="album-section-head">
+          <h2>Series</h2>
+          <span>{{ catalog.series_progress|length }} reconocida(s){% if catalog.series_uncached %} · {{ catalog.series_uncached }} por completar (pulsa Actualizar datos){% endif %}</span>
+          <button type="button" class="btn btn-secondary album-only-missing" onclick="toggleOnlyMissingSeries(this)">Ver solo las que faltan</button>
+        </div>
+        <div class="album-saga-grid">
+          {% for show in catalog.series_progress %}
+            <article class="album-saga" data-album-card>
+              <div class="album-saga-cover">
+                {% if show.poster_url %}
+                  <img src="{{ show.poster_url }}" alt="">
+                {% else %}
+                  <div class="album-poster-empty">Sin imagen</div>
+                {% endif %}
+              </div>
+              <div class="album-saga-info">
+                <div class="album-saga-top">
+                  <div>
+                    <h3>{{ show.title }}{% if show.year %} ({{ show.year }}){% endif %}</h3>
+                    <p>{{ show.owned_total }} de {{ show.expected_total }} episodios</p>
+                  </div>
+                  {% if show.missing_total %}
+                    <span class="album-chip warn">Faltan {{ show.missing_total }}</span>
+                  {% else %}
+                    <span class="album-chip ok">Completa</span>
+                  {% endif %}
+                </div>
+                <div class="album-progress"><span style="width: {{ (show.owned_total / show.expected_total * 100) if show.expected_total else 0 }}%"></span></div>
+                <div class="season-list">
+                  {% for season in show.seasons %}
+                    <div class="season-row {{ 'owned' if season.complete else ('missing' if season.owned_count == 0 else 'partial') }}">
+                      <div class="season-row-head">
+                        <strong>{{ season.name }}</strong>
+                        <span>{{ season.owned_count }}/{{ season.total_count }}</span>
+                      </div>
+                      {% if season.missing_episodes %}
+                        <small class="missing-text">Faltan episodios: {{ season.missing_episodes|join(", ") }}</small>
+                      {% elif season.total_count %}
+                        <small>Completa</small>
+                      {% endif %}
+                    </div>
+                  {% endfor %}
+                </div>
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
     {% if catalog.series %}
       <section class="album-section" data-album-section>
         <div class="album-section-head">
-          <h2>Series</h2>
-          <span>{{ catalog.series|length }} importadas</span>
+          <h2>Series por reconocer</h2>
+          <span>{{ catalog.series|length }} sin datos de TMDB todavía</span>
         </div>
         <div class="album-movie-grid">
           {% for show in catalog.series %}
@@ -358,6 +410,22 @@
       });
       section.querySelectorAll(".album-saga").forEach(function (card) {
         var hasMissing = card.querySelector(".album-part.missing");
+        card.style.display = (on && !hasMissing) ? "none" : "";
+      });
+      btn.textContent = on ? "Ver todas" : "Ver solo las que faltan";
+    }
+
+    // Igual que toggleOnlyMissing pero para la sección de Series: oculta
+    // temporadas completas y series sin nada pendiente.
+    function toggleOnlyMissingSeries(btn) {
+      var section = document.getElementById("seriesSection");
+      if (!section) return;
+      var on = section.classList.toggle("only-missing");
+      section.querySelectorAll(".season-row.owned").forEach(function (el) {
+        el.style.display = on ? "none" : "";
+      });
+      section.querySelectorAll(".album-saga").forEach(function (card) {
+        var hasMissing = card.querySelector(".season-row.missing, .season-row.partial");
         card.style.display = (on && !hasMissing) ? "none" : "";
       });
       btn.textContent = on ? "Ver todas" : "Ver solo las que faltan";
