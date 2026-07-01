@@ -783,6 +783,7 @@ def catalog_page(request: Request):
         **_base_context(),
         "catalog": catalog.build_catalog(),
         "discover": catalog.build_discover(),
+        "library_dups": catalog.library_duplicates(),
         "suggested_roots": catalog.suggested_roots(),
         "dedup_running": bool(dedup_notice.get("running")),
         "delete_dup_running": bool(delete_dup_notice.get("running")),
@@ -808,6 +809,22 @@ def catalog_update(limit: int = Form(80)):
             "running": False,
             "message": "Ya hay una actualizacion de catalogo en curso.",
         })
+    return RedirectResponse("/catalog", status_code=303)
+
+
+@app.post("/catalog/delete-file")
+def catalog_delete_file(path: str = Form("")):
+    """Borra un archivo concreto de la biblioteca (una copia duplicada).
+
+    Solo permite borrar dentro de las bibliotecas configuradas, por seguridad."""
+    path = (path or "").strip()
+    if path and catalog._within_catalog_roots(path) and os.path.isfile(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        db.delete_catalog_file(path)
+        catalog.invalidate_build()
     return RedirectResponse("/catalog", status_code=303)
 
 

@@ -261,6 +261,62 @@ DISCOVER_SECTIONS = [
 DISCOVER_TTL_SECONDS = 7 * 24 * 60 * 60
 
 
+def library_duplicates():
+    """Películas de la biblioteca que existen en más de un archivo (mismo tmdb_id).
+
+    Devuelve grupos con la película y la lista de copias (ruta, peso, calidad)
+    para que el usuario pueda borrar una o reorganizar."""
+    by_id = {}
+    for row in db.list_catalog_files(missing=False):
+        if row["media_type"] != "movie":
+            continue
+        tmdb_id = _int(row["tmdb_id"])
+        if not tmdb_id:
+            continue  # sin identificar no podemos saber si es la misma peli
+        by_id.setdefault(tmdb_id, []).append(row)
+
+    groups = []
+    for tmdb_id, rows in by_id.items():
+        # Copias en rutas distintas (mismo archivo movido no cuenta).
+        paths = {}
+        for r in rows:
+            paths.setdefault(r["path"], r)
+        if len(paths) < 2:
+            continue
+        copies = []
+        for r in paths.values():
+            copies.append({
+                "path": r["path"],
+                "folder": os.path.dirname(r["path"]),
+                "filename": r["filename"],
+                "size_bytes": r["size_bytes"] or 0,
+                "size_h": _human_size(r["size_bytes"] or 0),
+                "quality": r["quality"] or "",
+                "langs": r["langs"] or "",
+            })
+        copies.sort(key=lambda c: (-(c["size_bytes"] or 0), c["path"]))
+        first = rows[0]
+        groups.append({
+            "tmdb_id": tmdb_id,
+            "title": first["title"] or first["filename"],
+            "year": first["year"],
+            "poster_url": first["poster_url"],
+            "count": len(copies),
+            "copies": copies,
+        })
+    groups.sort(key=lambda g: (g["title"] or "").lower())
+    return groups
+
+
+def _human_size(n):
+    n = float(n or 0)
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if n < 1024 or unit == "TB":
+            return f"{int(n)} {unit}" if unit in ("B", "KB") else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"
+
+
 def owned_movie_ids():
     """Conjunto de tmdb_id de películas que el usuario ya tiene."""
     return {_int(e["tmdb_id"]) for e in owned_movie_entries() if _int(e["tmdb_id"])}

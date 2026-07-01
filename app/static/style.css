@@ -689,3 +689,27 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
 .discover-grid .album-movie.owned { filter: grayscale(.35) brightness(.82); }
 .discover-grid .album-movie.owned:hover { filter: none; }
 .album-only-missing { margin-left: auto; font-size: .8rem; padding: .28rem .6rem; }
+
+/* --- Duplicados de la biblioteca --- */
+.dup-list { display: flex; flex-direction: column; gap: .8rem; }
+.dup-card {
+  display: flex; gap: .9rem;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 10px; padding: .7rem;
+}
+.dup-poster { flex: 0 0 76px; }
+.dup-poster img, .dup-poster .album-poster-empty {
+  width: 76px; aspect-ratio: 2/3; object-fit: cover; border-radius: 6px;
+}
+.dup-body { flex: 1 1 auto; min-width: 0; }
+.dup-body h3 { margin: 0 0 .5rem; font-size: 1rem; display: flex; align-items: center; gap: .5rem; }
+.dup-copy {
+  display: flex; align-items: center; justify-content: space-between; gap: .8rem;
+  padding: .45rem 0; border-top: 1px solid rgba(255,255,255,.06);
+}
+.dup-copy-info { min-width: 0; display: flex; flex-direction: column; }
+.dup-copy-info strong { font-size: .86rem; word-break: break-all; }
+.dup-copy-info small { color: var(--album-muted); font-size: .76rem; word-break: break-all; }
+.btn-danger { background: #7a2230; color: #fff; border: 0; white-space: nowrap; }
+.btn-danger:hover { background: #97303f; }

@@ -59,6 +59,40 @@
       <small id="albumSearchSummary"></small>
     </section>
 
+    {% if library_dups %}
+      <section class="album-section" data-album-section>
+        <div class="album-section-head">
+          <h2>Duplicados</h2>
+          <span>{{ library_dups|length }} película(s) repetida(s)</span>
+        </div>
+        <div class="dup-list">
+          {% for dup in library_dups %}
+            <article class="dup-card" data-album-card>
+              <div class="dup-poster">
+                {% if dup.poster_url %}<img src="{{ dup.poster_url }}" alt="" loading="lazy">{% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
+              </div>
+              <div class="dup-body">
+                <h3>{{ dup.title }}{% if dup.year %} ({{ dup.year }}){% endif %} <span class="album-chip warn">{{ dup.count }} copias</span></h3>
+                {% for copy in dup.copies %}
+                  <div class="dup-copy">
+                    <div class="dup-copy-info">
+                      <strong>{{ copy.filename }}</strong>
+                      <small>{{ copy.folder }}</small>
+                      <small>{{ copy.size_h }}{% if copy.quality %} · {{ copy.quality }}{% endif %}{% if copy.langs %} · {{ copy.langs }}{% endif %}</small>
+                    </div>
+                    <form method="post" action="/catalog/delete-file" onsubmit="return confirm('¿Borrar este archivo del disco?\n\n{{ copy.path }}\n\nEsta acción no se puede deshacer.');">
+                      <input type="hidden" name="path" value="{{ copy.path }}">
+                      <button type="submit" class="btn btn-danger">🗑️ Borrar este</button>
+                    </form>
+                  </div>
+                {% endfor %}
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
     {% if catalog.collections %}
       <section class="album-section" data-album-section id="sagasSection">
         <div class="album-section-head">

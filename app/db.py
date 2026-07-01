@@ -301,6 +301,11 @@ def update_catalog_file(path, **fields):
         conn.execute(f"UPDATE catalog_files SET {cols} WHERE path=?", vals)
 
 
+def delete_catalog_file(path):
+    with _lock, get_conn() as conn:
+        conn.execute("DELETE FROM catalog_files WHERE path=?", (path,))
+
+
 def get_catalog_file_by_path(path):
     with get_conn() as conn:
         return conn.execute("SELECT * FROM catalog_files WHERE path=?", (path,)).fetchone()
