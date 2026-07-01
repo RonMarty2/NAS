@@ -101,7 +101,7 @@
             <span>{{ folder.count }} título(s) · {{ folder.root }}</span>
           </div>
           <div class="album-movie-grid">
-            {% for movie in folder.items %}
+            {% for movie in folder['items'] %}
               <article class="album-movie" data-album-card>
                 <div class="album-movie-poster">
                   {% if movie.poster_url %}
