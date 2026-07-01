@@ -322,8 +322,16 @@
     </div>
     <div id="catalogTabFolders" class="catalog-tab-panel" hidden>
     {% if by_folder %}
+      <div class="folder-picker">
+        <label for="folderPicker">Ver carpeta</label>
+        <select id="folderPicker" onchange="showFolder(this.value)">
+          {% for folder in by_folder %}
+            <option value="folder-{{ loop.index0 }}">📁 {{ folder.name }} ({{ folder.count }})</option>
+          {% endfor %}
+        </select>
+      </div>
       {% for folder in by_folder %}
-        <section class="album-section" data-album-section>
+        <section class="album-section" data-album-section data-folder-panel id="folder-{{ loop.index0 }}" {% if not loop.first %}hidden{% endif %}>
           <div class="album-section-head">
             <h2>📁 {{ folder.name }}</h2>
             <span>{{ folder.count }} título(s) · {{ folder.root }}</span>
@@ -367,7 +375,9 @@
       var input = document.getElementById("albumSearch");
       if (!input) return;
       var cards = Array.prototype.slice.call(document.querySelectorAll("[data-album-card]"));
-      var sections = Array.prototype.slice.call(document.querySelectorAll("[data-album-section]"));
+      // Los paneles de "por carpeta" (data-folder-panel) NO se ocultan por
+      // busqueda: su visibilidad la controla el desplegable de carpeta.
+      var sections = Array.prototype.slice.call(document.querySelectorAll("[data-album-section]:not([data-folder-panel])"));
       var empty = document.getElementById("albumSearchEmpty");
       var summary = document.getElementById("albumSearchSummary");
       var clear = document.getElementById("albumSearchClear");
@@ -463,6 +473,24 @@
       });
       try { sessionStorage.setItem("nas-catalog-tab", name); } catch (e) {}
     }
+    // Desplegable "Ver carpeta": muestra solo la carpeta elegida, una opción
+    // por cada biblioteca que hayas escaneado (se genera sola, sin tocar código).
+    function showFolder(id) {
+      document.querySelectorAll("[data-folder-panel]").forEach(function (panel) {
+        panel.hidden = panel.id !== id;
+      });
+      try { sessionStorage.setItem("nas-catalog-folder", id); } catch (e) {}
+    }
+    (function () {
+      try {
+        var savedFolder = sessionStorage.getItem("nas-catalog-folder");
+        var picker = document.getElementById("folderPicker");
+        if (savedFolder && picker && picker.querySelector('option[value="' + savedFolder + '"]')) {
+          picker.value = savedFolder;
+          showFolder(savedFolder);
+        }
+      } catch (e) {}
+    })();
     (function () {
       try {
         var saved = sessionStorage.getItem("nas-catalog-tab");

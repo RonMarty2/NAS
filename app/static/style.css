@@ -773,3 +773,15 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
 .catalog-subtab:hover { color: var(--album-text, #e6edf3); }
 .catalog-subtab.active { color: var(--primary); border-bottom-color: var(--primary); }
 .catalog-tab-panel[hidden] { display: none; }
+
+/* --- Selector "Ver carpeta" dentro de la pestaña Por carpeta --- */
+.folder-picker {
+  display: flex; align-items: center; gap: .6rem;
+  margin: .2rem 0 1.2rem;
+}
+.folder-picker label { color: var(--album-muted); font-size: .84rem; font-weight: 700; }
+.folder-picker select {
+  background: rgba(255,255,255,.04); color: var(--album-text, #e6edf3);
+  border: 1px solid rgba(255,255,255,.12); border-radius: 8px;
+  padding: .45rem .6rem; font-size: .9rem;
+}
