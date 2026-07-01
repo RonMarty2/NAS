@@ -1,6 +1,7 @@
 """Catalogo visual: sagas, peliculas que tienes y faltantes."""
 import json
 import os
+import re
 import threading
 import time
 
@@ -264,30 +265,47 @@ DISCOVER_SECTIONS = [
 DISCOVER_TTL_SECONDS = 7 * 24 * 60 * 60
 
 
-def library_duplicates():
-    """Películas de la biblioteca que existen en más de un archivo (mismo tmdb_id).
+_DUP_STRIP = re.compile(
+    r"\b(1080p|2160p|720p|480p|4k|uhd|bluray|bdrip|brrip|web[- ]?dl|webrip|hdtv|dvdrip|hdrip|"
+    r"x264|x265|h264|h265|hevc|avc|aac|ac3|eac3|dts|dd5\.?1|ddp5\.?1|10bit|hdr|remux|"
+    r"latino|castellano|espanol|español|dual|multi|sub|subs|ingles|vose)\b",
+    re.I,
+)
 
-    Devuelve grupos con la película y la lista de copias (ruta, peso, calidad)
-    para que el usuario pueda borrar una o reorganizar."""
-    by_id = {}
+
+def _dup_key(filename, year):
+    """Nombre 'canónico' para comparar duplicados de VERDAD: quita extensión,
+    año, y etiquetas de calidad/códec/idioma, dejando solo el título. Así dos
+    archivos son duplicados solo si su título real coincide (evita marcar como
+    duplicado pelis distintas de la misma saga que TMDB identificó igual)."""
+    name = os.path.splitext(filename or "")[0].lower()
+    name = re.sub(r"\(?\b(19|20)\d{2}\b\)?", " ", name)  # año
+    name = _DUP_STRIP.sub(" ", name)
+    name = re.sub(r"[^a-z0-9à-ÿ]+", " ", name)  # signos -> espacio
+    return " ".join(name.split()).strip()
+
+
+def library_duplicates():
+    """Películas de la biblioteca que están DUPLICADAS de verdad: el MISMO título
+    (según el nombre del archivo) en dos o más rutas. Es estricto a propósito
+    porque hay un botón de borrar: no basta con que TMDB les diera el mismo id
+    (eso marcaba por error pelis distintas de una saga, p.ej. The Purge)."""
+    by_key = {}
     for row in db.list_catalog_files(missing=False):
         if row["media_type"] != "movie":
             continue
-        tmdb_id = _int(row["tmdb_id"])
-        if not tmdb_id:
-            continue  # sin identificar no podemos saber si es la misma peli
-        by_id.setdefault(tmdb_id, []).append(row)
+        key = _dup_key(row["filename"], row["year"])
+        if not key:
+            continue
+        by_key.setdefault(key, {})[row["path"]] = row  # dedup por ruta
 
     groups = []
-    for tmdb_id, rows in by_id.items():
-        # Copias en rutas distintas (mismo archivo movido no cuenta).
-        paths = {}
-        for r in rows:
-            paths.setdefault(r["path"], r)
+    for key, paths in by_key.items():
         if len(paths) < 2:
             continue
+        rows = list(paths.values())
         copies = []
-        for r in paths.values():
+        for r in rows:
             copies.append({
                 "path": r["path"],
                 "folder": os.path.dirname(r["path"]),
@@ -298,9 +316,9 @@ def library_duplicates():
                 "langs": r["langs"] or "",
             })
         copies.sort(key=lambda c: (-(c["size_bytes"] or 0), c["path"]))
-        first = rows[0]
+        first = max(rows, key=lambda r: bool(r["tmdb_id"]))
         groups.append({
-            "tmdb_id": tmdb_id,
+            "tmdb_id": _int(first["tmdb_id"]),
             "title": first["title"] or first["filename"],
             "year": first["year"],
             "poster_url": first["poster_url"],
