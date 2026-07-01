@@ -328,14 +328,25 @@ def get_catalog_file_by_path(path):
         return conn.execute("SELECT * FROM catalog_files WHERE path=?", (path,)).fetchone()
 
 
-def touch_catalog_file(path, last_seen=None):
+def touch_catalog_file(path, last_seen=None, import_root=None):
+    """Refresca un archivo ya catalogado (visto de nuevo en un re-escaneo sin
+    cambios). Si trae import_root y el archivo aún no tenía uno guardado, lo
+    rellena aquí: si no, los re-escaneos nunca corrigen archivos antiguos
+    (se saltan por 'sin cambios' antes de llegar a guardar la carpeta)."""
     if last_seen is None:
         last_seen = time.time()
     with _lock, get_conn() as conn:
-        conn.execute(
-            "UPDATE catalog_files SET last_seen=?, missing=0 WHERE path=?",
-            (last_seen, path),
-        )
+        if import_root:
+            conn.execute(
+                "UPDATE catalog_files SET last_seen=?, missing=0, "
+                "import_root=COALESCE(import_root, ?) WHERE path=?",
+                (last_seen, import_root, path),
+            )
+        else:
+            conn.execute(
+                "UPDATE catalog_files SET last_seen=?, missing=0 WHERE path=?",
+                (last_seen, path),
+            )
 
 
 def list_catalog_files(missing=None):

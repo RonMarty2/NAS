@@ -351,10 +351,34 @@ def library_duplicates():
     return groups
 
 
+def _nearest_root(path):
+    """Carpeta de biblioteca configurada que contiene `path` (la más específica).
+
+    Respaldo para agrupar archivos que no tienen import_root guardado (se
+    importaron antes de que existiera ese campo, o un re-escaneo los saltó por
+    no haber cambiado). Sin esto, cada archivo caía en SU PROPIA carpeta exacta
+    y una biblioteca de 200 películas se veía como 200 secciones sueltas."""
+    try:
+        rp = os.path.realpath(path)
+    except (OSError, TypeError):
+        return None
+    best = None
+    for root in _catalog_roots():
+        try:
+            rr = os.path.realpath(root)
+        except (OSError, TypeError):
+            continue
+        if rp == rr or rp.startswith(rr + os.sep):
+            if best is None or len(rr) > len(best):
+                best = rr
+    return best
+
+
 def build_by_folder():
     """Agrupa la biblioteca por la carpeta que se escaneó: una sección por cada
     carpeta importada (p.ej. 'peliculas', 'hxh'). Para archivos importados antes
-    de guardar la carpeta, cae en la carpeta contenedora como respaldo.
+    de guardar la carpeta, usa la carpeta de biblioteca configurada que la
+    contiene (no la carpeta exacta del archivo, que fragmentaría todo).
 
     Las series se colapsan en UNA tarjeta por serie (con el nº de episodios),
     no una por episodio: si no, una sola serie con 60 capítulos llenaba toda
@@ -363,7 +387,7 @@ def build_by_folder():
     series_by_group = {}  # (root, clave_serie) -> tarjeta acumulada
 
     for row in db.list_catalog_files(missing=False):
-        root = row["import_root"] or os.path.dirname(row["path"])
+        root = row["import_root"] or _nearest_root(row["path"]) or os.path.dirname(row["path"])
         g = groups.setdefault(root, {"root": root, "name": os.path.basename(root.rstrip("/\\")) or root, "items": []})
 
         if row["media_type"] == "series":
@@ -569,7 +593,7 @@ def import_folder(root, enrich_limit=80, progress=None):
             filename = os.path.basename(path)
             changed = not existing or existing["size_bytes"] != stat.st_size or existing["mtime_ns"] != stat.st_mtime_ns
             if existing and not changed and existing["tmdb_id"]:
-                db.touch_catalog_file(path, last_seen=scan_ts)
+                db.touch_catalog_file(path, last_seen=scan_ts, import_root=import_root)
                 skipped += 1
                 continue
             ident = identify.identify(path)
