@@ -516,6 +516,24 @@ def update_discover(limit=20, progress=None):
 MAX_MATCH_ATTEMPTS = 2
 
 
+def _query_title_from_filename(filename):
+    """Título más completo para BUSCAR en TMDB, a partir del nombre de archivo.
+
+    guessit (usado por identify.identify) a veces corta el título en el primer
+    guion, perdiendo el subtítulo que distingue películas de la misma saga
+    (ej. '12 Horas para sobrevivir - El Año de la Elección (2016)' quedaba
+    solo como '12 Horas para sobrevivir', y TMDB devolvía la de 2014 para las
+    tres). Esta versión conserva guiones/subtítulo y solo quita ruido técnico
+    (calidad, códec, idioma, año, extensión), así la búsqueda es más precisa."""
+    name = os.path.splitext(filename or "")[0]
+    name = re.sub(r"\(?\b(19|20)\d{2}\b\)?", " ", name)  # año (ruido para buscar)
+    name = re.sub(r"\bS\d{1,2}E\d{1,3}\b", " ", name, flags=re.I)  # S05E11
+    name = re.sub(r"\b\d{1,2}x\d{1,3}\b", " ", name, flags=re.I)   # 5x11
+    name = _DUP_STRIP.sub(" ", name)
+    name = re.sub(r"[._]+", " ", name)  # puntos/guiones bajos -> espacio
+    return " ".join(name.split()).strip()
+
+
 def enrich_unmatched(limit=None, progress=None):
     """Rellena póster/datos de TODAS las películas importadas sin match de TMDB
     (las que salían 'Sin imagen'). Las que TMDB no reconoce tras varios intentos
@@ -533,7 +551,7 @@ def enrich_unmatched(limit=None, progress=None):
     total = len(pendientes)
     matched = 0
     for i, row in enumerate(pendientes):
-        title = row["title"] or _fallback_title(row["filename"])
+        title = _query_title_from_filename(row["filename"]) or row["title"] or _fallback_title(row["filename"])
         match = None
         if title:
             try:
@@ -559,6 +577,51 @@ def enrich_unmatched(limit=None, progress=None):
                     collection_detail = tmdb.collection_details(collection["id"])
                     if collection_detail:
                         _set_json(f"collection:{collection['id']}", collection_detail)
+        if progress and i % 10 == 0:
+            progress({"done": i + 1, "total": total, "current": title or ""})
+    return matched
+
+
+def enrich_unmatched_series(limit=None, progress=None):
+    """Igual que enrich_unmatched pero para SERIES: intenta reconocer contra
+    TMDB los episodios importados que quedaron sin tmdb_id (aparecen en
+    'Series por reconocer'). Sin esto, esos episodios se quedaban sin
+    reintentarse nunca, y su progreso de temporadas no contaba (aunque el
+    usuario sí tuviera esos capítulos)."""
+    if not tmdb.configured():
+        return 0
+    pendientes = [
+        row for row in db.list_catalog_files(missing=False)
+        if row["media_type"] == "series" and not _int(row["tmdb_id"])
+        and (row["match_attempts"] or 0) < MAX_MATCH_ATTEMPTS
+    ]
+    if limit:
+        pendientes = pendientes[:int(limit)]
+    total = len(pendientes)
+    matched = 0
+    for i, row in enumerate(pendientes):
+        title = _query_title_from_filename(row["filename"]) or row["title"] or _fallback_title(row["filename"])
+        match = None
+        if title:
+            try:
+                match = tmdb.best_match(title, "series", row["year"])
+            except Exception:
+                match = None
+        if not match:
+            db.update_catalog_file(row["path"], match_attempts=(row["match_attempts"] or 0) + 1)
+        else:
+            db.update_catalog_file(row["path"], **{
+                "tmdb_id": match["tmdb_id"],
+                "title": match["title"] or title,
+                "year": match["year"] or row["year"],
+                "poster_url": match["poster_url"],
+                "overview": match["overview"],
+            })
+            matched += 1
+            if _cache_stale(f"series:{match['tmdb_id']}"):
+                detail = tmdb.tv_details(match["tmdb_id"])
+                if detail:
+                    _set_json(f"series:{match['tmdb_id']}", detail)
         if progress and i % 10 == 0:
             progress({"done": i + 1, "total": total, "current": title or ""})
     return matched
@@ -612,8 +675,9 @@ def import_folder(root, enrich_limit=80, progress=None):
                 "season": ident.get("season"),
                 "episode": ident.get("episode"),
             }
+            search_query = _query_title_from_filename(filename) or fields["title"]
             if media_type == "movie" and matched < enrich_limit and tmdb.configured():
-                match = tmdb.best_match(fields["title"], "movie", fields["year"])
+                match = tmdb.best_match(search_query, "movie", fields["year"])
                 if match:
                     fields.update({
                         "tmdb_id": match["tmdb_id"],
@@ -632,7 +696,7 @@ def import_folder(root, enrich_limit=80, progress=None):
                                 _set_json(f"collection:{collection['id']}", collection_detail)
                     matched += 1
             elif media_type == "series" and matched < enrich_limit and tmdb.configured():
-                match = tmdb.best_match(fields["title"], "series", fields["year"])
+                match = tmdb.best_match(search_query, "series", fields["year"])
                 if match:
                     fields.update({
                         "tmdb_id": match["tmdb_id"],
