@@ -228,7 +228,29 @@ def _build_catalog_uncached():
     # contador 'uncached' de arriba (que mezcla "sin tmdb_id" con "tiene
     # tmdb_id pero el detalle aún no se cacheó"). Esta es la que responde
     # "¿ya terminé con todo?": vacía = no queda ninguna huérfana.
-    unmatched = [row for row in catalog_rows if not _int(row["tmdb_id"])]
+    # Las series se agrupan por su carpeta (una línea por serie, no una por
+    # episodio: 147 capítulos de Aída sin reconocer = 1 sola línea con el
+    # conteo, y corregirla arregla todos sus episodios de una vez).
+    unmatched_movies = []
+    unmatched_series = {}
+    for row in catalog_rows:
+        if _int(row["tmdb_id"]):
+            continue
+        if row["media_type"] == "series":
+            u_root = row["import_root"] or _nearest_root(row["path"]) or os.path.dirname(row["path"])
+            folder = _series_top_folder(row["path"], u_root)
+            entry = unmatched_series.setdefault((u_root, folder.lower()), {
+                "title": folder, "path": row["path"], "media_type": "series",
+                "episode_count": 0,
+            })
+            entry["episode_count"] += 1
+        else:
+            unmatched_movies.append({
+                "title": row["title"] or row["filename"], "path": row["path"],
+                "media_type": row["media_type"], "episode_count": None,
+            })
+    unmatched = sorted(unmatched_series.values(), key=lambda e: e["title"].lower()) + \
+        sorted(unmatched_movies, key=lambda e: (e["title"] or "").lower())
 
     return {
         "collections": collections_list,
@@ -344,10 +366,25 @@ def apply_manual_match(path, tmdb_id, media_type):
         if not detail:
             return False, "No se pudo obtener esa serie de TMDB."
         _set_json(f"series:{tmdb_id}", detail)
-        db.update_catalog_file(path, tmdb_id=tmdb_id, media_type="series",
-                                title=detail.get("title"), year=detail.get("year"),
-                                poster_url=detail.get("poster_url"), overview=detail.get("overview"),
-                                match_attempts=0)
+        # Corregir una serie aplica a TODOS sus episodios (misma carpeta de
+        # serie), no solo al archivo elegido: si no, una serie con 147
+        # capítulos sin reconocer habría que corregirla 147 veces.
+        root = row["import_root"] or _nearest_root(row["path"]) or os.path.dirname(row["path"])
+        folder = _series_top_folder(row["path"], root).lower()
+        fields = dict(tmdb_id=tmdb_id, media_type="series",
+                      title=detail.get("title"), year=detail.get("year"),
+                      poster_url=detail.get("poster_url"), overview=detail.get("overview"),
+                      match_attempts=0)
+        updated = 0
+        for r in db.list_catalog_files(missing=False):
+            if r["media_type"] != "series":
+                continue
+            r_root = r["import_root"] or _nearest_root(r["path"]) or os.path.dirname(r["path"])
+            if r_root == root and _series_top_folder(r["path"], r_root).lower() == folder:
+                db.update_catalog_file(r["path"], **fields)
+                updated += 1
+        invalidate_build()
+        return True, f"Actualizado a: {detail.get('title')} ({detail.get('year') or 's/f'}) — {updated} episodio(s) de la serie."
     else:
         detail = tmdb.movie_details(tmdb_id)
         if not detail:

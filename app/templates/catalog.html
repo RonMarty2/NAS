@@ -86,7 +86,7 @@
           {% for row in catalog.unmatched %}
             <div class="unmatched-row" data-album-card>
               <div class="unmatched-row-info">
-                <strong>{{ row.title or row.filename }}</strong>
+                <strong>{{ row.title }}{% if row.episode_count %} · {{ row.episode_count }} episodio(s){% endif %}</strong>
                 <small>{{ row.path }}</small>
               </div>
               <a class="btn btn-secondary" href="/catalog/fix?path={{ row.path|urlencode }}&media_type={{ row.media_type }}">✏️ Buscar y corregir</a>
