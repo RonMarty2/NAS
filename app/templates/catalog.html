@@ -114,7 +114,10 @@
                   {% endif %}
                 </div>
                 <strong>{{ movie.title }}</strong>
-                <small>{% if movie.year %}{{ movie.year }}{% endif %}{% if movie.langs %} · {{ movie.langs }}{% endif %}</small>
+                <small>
+                  {% if movie.episode_count %}{{ movie.episode_count }} episodio(s){% elif movie.year %}{{ movie.year }}{% endif %}
+                  {% if movie.langs %} · {{ movie.langs }}{% endif %}
+                </small>
               </article>
             {% endfor %}
           </div>

@@ -354,11 +354,39 @@ def library_duplicates():
 def build_by_folder():
     """Agrupa la biblioteca por la carpeta que se escaneó: una sección por cada
     carpeta importada (p.ej. 'peliculas', 'hxh'). Para archivos importados antes
-    de guardar la carpeta, cae en la carpeta contenedora como respaldo."""
+    de guardar la carpeta, cae en la carpeta contenedora como respaldo.
+
+    Las series se colapsan en UNA tarjeta por serie (con el nº de episodios),
+    no una por episodio: si no, una sola serie con 60 capítulos llenaba toda
+    la pantalla de tarjetas vacías repetidas ('Serie', S01E01, S01E02...)."""
     groups = {}
+    series_by_group = {}  # (root, clave_serie) -> tarjeta acumulada
+
     for row in db.list_catalog_files(missing=False):
         root = row["import_root"] or os.path.dirname(row["path"])
         g = groups.setdefault(root, {"root": root, "name": os.path.basename(root.rstrip("/\\")) or root, "items": []})
+
+        if row["media_type"] == "series":
+            key = (root, _int(row["tmdb_id"]) or (row["title"] or row["filename"]).lower())
+            card = series_by_group.get(key)
+            if not card:
+                card = {
+                    "tmdb_id": _int(row["tmdb_id"]),
+                    "title": row["title"] or "Serie",
+                    "year": row["year"],
+                    "poster_url": row["poster_url"],
+                    "media_type": "series",
+                    "quality": row["quality"] or "",
+                    "langs": row["langs"] or "",
+                    "episode_count": 0,
+                }
+                series_by_group[key] = card
+                g["items"].append(card)
+            card["episode_count"] += 1
+            if not card["poster_url"] and row["poster_url"]:
+                card["poster_url"] = row["poster_url"]
+            continue
+
         g["items"].append({
             "tmdb_id": _int(row["tmdb_id"]),
             "title": row["title"] or row["filename"],
@@ -367,7 +395,9 @@ def build_by_folder():
             "media_type": row["media_type"],
             "quality": row["quality"] or "",
             "langs": row["langs"] or "",
+            "episode_count": None,
         })
+
     sections = []
     for g in groups.values():
         g["items"].sort(key=lambda m: ((m["title"] or "").lower(), m["year"] or 0))
