@@ -65,11 +65,44 @@ def _iter_all_files(root):
             yield os.path.join(dirpath, name)
 
 
-def run_scan(progress=None):
-    """Recorre las bibliotecas buscando: videos corruptos/ilegibles y archivos
-    .nfo/poster/fanart huérfanos (sin video asociado en la misma carpeta)."""
+def suggested_roots():
+    """Carpetas sugeridas para el selector (bibliotecas configuradas)."""
+    return _library_roots()
+
+
+def _within_roots(path):
+    try:
+        rp = os.path.realpath(path)
+    except (OSError, TypeError):
+        return False
+    for root in _library_roots():
+        try:
+            rr = os.path.realpath(root)
+        except (OSError, TypeError):
+            continue
+        if rp == rr or rp.startswith(rr + os.sep):
+            return True
+    return False
+
+
+def run_scan(progress=None, folder=None):
+    """Recorre la(s) biblioteca(s) buscando: videos corruptos/ilegibles y
+    archivos .nfo/poster/fanart huérfanos (sin video asociado en la carpeta).
+
+    Si `folder` se indica, analiza SOLO esa carpeta (debe estar dentro de las
+    bibliotecas configuradas); si no, analiza todas."""
     video_exts = config.ext_list("video_exts")
-    roots = _library_roots()
+    folder = (folder or "").strip()
+    if folder:
+        if not _within_roots(folder) or not os.path.isdir(folder):
+            return {
+                "checked_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "broken": [], "orphans": [], "videos_checked": 0,
+                "error": "Esa carpeta no existe o está fuera de tus bibliotecas configuradas.",
+            }
+        roots = [folder]
+    else:
+        roots = _library_roots()
     all_paths = []
     for root in roots:
         all_paths.extend(_iter_all_files(root))
@@ -118,21 +151,6 @@ def run_scan(progress=None):
     }
     _set_result(result)
     return result
-
-
-def _within_roots(path):
-    try:
-        rp = os.path.realpath(path)
-    except (OSError, TypeError):
-        return False
-    for root in _library_roots():
-        try:
-            rr = os.path.realpath(root)
-        except (OSError, TypeError):
-            continue
-        if rp == rr or rp.startswith(rr + os.sep):
-            return True
-    return False
 
 
 def delete_broken(path):

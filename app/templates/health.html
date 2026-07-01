@@ -8,9 +8,18 @@
         <p>Busca archivos rotos/corruptos y .nfo o pósters huérfanos sin su video. No borra nada solo: tú decides.</p>
       </div>
       <div class="album-tools">
-        <form method="post" action="/health/scan" class="album-form album-form-small">
+        <form method="post" action="/health/scan" class="album-form">
+          <label>
+            <span>Carpeta a analizar</span>
+            <input class="album-path" name="folder" list="health-roots" value="" placeholder="Vacío = todas tus bibliotecas">
+          </label>
+          <datalist id="health-roots">
+            {% for root in suggested_roots %}
+              <option value="{{ root }}">
+            {% endfor %}
+          </datalist>
           <button class="btn btn-primary" type="submit" {% if health_running %}disabled{% endif %}>
-            {% if health_running %}Analizando...{% else %}🩺 Analizar biblioteca{% endif %}
+            {% if health_running %}Analizando...{% else %}🩺 Analizar{% endif %}
           </button>
         </form>
       </div>

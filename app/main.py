@@ -948,23 +948,25 @@ def health_page(request: Request):
         "health_notice": health.status(),
         "health_running": bool(health.status().get("running")),
         "result": health.last_result(),
+        "suggested_roots": health.suggested_roots(),
     })
 
 
 @app.post("/health/scan")
-def health_scan():
-    started = _start_health_scan()
+def health_scan(folder: str = Form("")):
+    started = _start_health_scan(folder)
     if not started:
         health.set_status({"running": False, "message": "Ya hay un análisis en curso."})
     return RedirectResponse("/health", status_code=303)
 
 
-def _start_health_scan():
+def _start_health_scan(folder=""):
     if not HEALTH_LOCK.acquire(blocking=False):
         return False
+    label = folder.strip() or "todas las bibliotecas"
     health.set_status({
         "running": True,
-        "message": "Revisando archivos de la biblioteca...",
+        "message": f"Revisando archivos en {label}...",
         "done": 0,
         "total": 0,
         "current": "",
@@ -975,22 +977,25 @@ def _start_health_scan():
             def push(update):
                 health.set_status({
                     "running": True,
-                    "message": "Revisando archivos de la biblioteca...",
+                    "message": f"Revisando archivos en {label}...",
                     "done": update.get("done", 0),
                     "total": update.get("total", 0),
                     "current": update.get("current", ""),
                 })
 
-            result = health.run_scan(progress=push)
-            n_broken = len(result.get("broken", []))
-            n_orphans = len(result.get("orphans", []))
-            health.set_status({
-                "running": False,
-                "message": f"Análisis terminado: {n_broken} archivo(s) rotos, {n_orphans} huérfano(s).",
-                "done": result.get("videos_checked", 0),
-                "total": result.get("videos_checked", 0),
-                "current": "",
-            })
+            result = health.run_scan(progress=push, folder=folder)
+            if result.get("error"):
+                health.set_status({"running": False, "message": result["error"]})
+            else:
+                n_broken = len(result.get("broken", []))
+                n_orphans = len(result.get("orphans", []))
+                health.set_status({
+                    "running": False,
+                    "message": f"Análisis terminado: {n_broken} archivo(s) rotos, {n_orphans} huérfano(s).",
+                    "done": result.get("videos_checked", 0),
+                    "total": result.get("videos_checked", 0),
+                    "current": "",
+                })
         except Exception as exc:
             health.set_status({"running": False, "message": f"No se pudo completar el análisis: {exc}"})
         finally:
