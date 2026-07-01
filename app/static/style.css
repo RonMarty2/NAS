@@ -397,7 +397,7 @@ body:has(.album-page) footer { color: #6f6f6f; }
 }
 .album-search-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
   gap: .55rem;
 }
 .album-search input {

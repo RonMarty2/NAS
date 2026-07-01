@@ -55,6 +55,9 @@
       <div class="album-search-row">
         <input id="albumSearch" type="search" placeholder="Película, serie o saga" autocomplete="off">
         <a id="albumSearchClear" class="btn btn-secondary" href="/catalog">Limpiar</a>
+        <form method="post" action="/catalog/refresh" title="Si borraste o moviste archivos fuera de la app (File Station), esto los quita de la vista sin repetir el escaneo completo">
+          <button class="btn btn-secondary" type="submit">🔄 Actualizar vista</button>
+        </form>
       </div>
       <small id="albumSearchSummary"></small>
     </section>

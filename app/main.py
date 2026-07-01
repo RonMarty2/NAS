@@ -802,6 +802,19 @@ def catalog_page(request: Request):
     })
 
 
+@app.post("/catalog/refresh")
+def catalog_refresh():
+    """Revisión rápida: quita del catálogo lo que ya no existe en disco (borrado
+    o movido fuera de la app), sin volver a consultar TMDB. Redirige de vuelta
+    a donde estaba el usuario (útil tras borrar un duplicado, p.ej.)."""
+    result = catalog.refresh_existing()
+    catalog.set_status({
+        "running": False,
+        "message": f"Vista actualizada: revisados {result['checked']}, quitados {result['removed']} que ya no existen.",
+    })
+    return RedirectResponse("/catalog", status_code=303)
+
+
 @app.post("/catalog/import")
 def catalog_import(folder: str = Form(""), limit: int = Form(80)):
     started = _start_catalog_import(folder, limit)

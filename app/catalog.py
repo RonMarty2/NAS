@@ -274,15 +274,37 @@ _DUP_STRIP = re.compile(
 
 
 def _dup_key(filename, year):
-    """Nombre 'canónico' para comparar duplicados de VERDAD: quita extensión,
-    año, y etiquetas de calidad/códec/idioma, dejando solo el título. Así dos
-    archivos son duplicados solo si su título real coincide (evita marcar como
-    duplicado pelis distintas de la misma saga que TMDB identificó igual)."""
+    """Clave 'canónica' para comparar duplicados de VERDAD: título limpio
+    (sin etiquetas de calidad/códec/idioma) + año. El año SÍ importa: dos
+    películas con el mismo título pero año distinto son casi siempre un
+    remake (p.ej. La Momia 1999 vs 2017), no un duplicado. Así, dos archivos
+    solo cuentan como duplicados si título Y año coinciden de verdad (evita
+    marcar como duplicado pelis distintas de la misma saga que TMDB
+    identificó con el mismo tmdb_id por error, p.ej. The Purge)."""
     name = os.path.splitext(filename or "")[0].lower()
-    name = re.sub(r"\(?\b(19|20)\d{2}\b\)?", " ", name)  # año
+    name = re.sub(r"\(?\b(19|20)\d{2}\b\)?", " ", name)  # año en el nombre (ruido)
     name = _DUP_STRIP.sub(" ", name)
     name = re.sub(r"[^a-z0-9à-ÿ]+", " ", name)  # signos -> espacio
-    return " ".join(name.split()).strip()
+    title_key = " ".join(name.split()).strip()
+    if not title_key:
+        return None
+    return (title_key, year or None)
+
+
+def refresh_existing():
+    """Revisión RÁPIDA (sin tocar TMDB): comprueba qué archivos ya catalogados
+    siguen existiendo en disco y marca como faltantes los que ya no. Útil
+    cuando borraste/moviste algo fuera de la app (File Station) y quieres que
+    el catálogo/duplicados se actualicen sin repetir el escaneo completo."""
+    removed = 0
+    checked = 0
+    for row in db.list_catalog_files(missing=False):
+        checked += 1
+        if not os.path.exists(row["path"]):
+            db.delete_catalog_file(row["path"])
+            removed += 1
+    invalidate_build()
+    return {"checked": checked, "removed": removed}
 
 
 def library_duplicates():
@@ -295,7 +317,7 @@ def library_duplicates():
         if row["media_type"] != "movie":
             continue
         key = _dup_key(row["filename"], row["year"])
-        if not key:
+        if key is None:
             continue
         by_key.setdefault(key, {})[row["path"]] = row  # dedup por ruta
 
