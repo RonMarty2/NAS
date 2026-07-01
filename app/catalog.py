@@ -798,6 +798,43 @@ def enrich_unmatched(limit=None, progress=None):
     return matched
 
 
+_SE_RE = re.compile(r"[Ss](\d{1,4})[\s._-]*[Ee](\d{1,3})")
+_X_RE = re.compile(r"\b(\d{1,2})x(\d{1,3})\b")
+
+
+def _parse_season_episode(filename):
+    """Saca (temporada, episodio) del nombre: 'S10E03', '5x11'... Regex primero
+    (rápido); guessit con guardián solo como respaldo."""
+    m = _SE_RE.search(filename or "") or _X_RE.search(filename or "")
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    g = identify.guessit_safe(filename or "")
+    s, e = g.get("season"), g.get("episode")
+    if isinstance(s, list):
+        s = s[0] if s else None
+    if isinstance(e, list):
+        e = e[0] if e else None
+    try:
+        return int(s), int(e)
+    except (TypeError, ValueError):
+        return None, None
+
+
+def backfill_series_episode_numbers():
+    """Rellena temporada/episodio de episodios importados ANTES de que esas
+    columnas existieran (el re-escaneo los salta por 'sin cambios', así que
+    nunca se completaban solos). Sin ese dato, el progreso de la serie no los
+    cuenta y muestra 'faltan' episodios que sí están en el disco."""
+    updates = []
+    for r in db.list_catalog_files(missing=False):
+        if r["media_type"] != "series" or r["season"] is not None:
+            continue
+        season, episode = _parse_season_episode(r["filename"])
+        if season is not None and episode is not None:
+            updates.append((season, episode, r["path"]))
+    return db.set_catalog_episode_numbers(updates)
+
+
 def enrich_unmatched_series(limit=None, progress=None):
     """Reintenta reconocer las SERIES importadas sin tmdb_id, por carpeta.
 

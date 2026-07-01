@@ -336,6 +336,18 @@ def update_catalog_file(path, **fields):
         conn.execute(f"UPDATE catalog_files SET {cols} WHERE path=?", vals)
 
 
+def set_catalog_episode_numbers(rows):
+    """Guarda (season, episode) para muchas rutas en una transacción.
+    `rows` = lista de tuplas (season, episode, path)."""
+    rows = list(rows)
+    if not rows:
+        return 0
+    with _lock, get_conn() as conn:
+        conn.executemany(
+            "UPDATE catalog_files SET season=?, episode=? WHERE path=?", rows)
+    return len(rows)
+
+
 def touch_catalog_files_bulk(paths, last_seen, import_root=None):
     """Como touch_catalog_file pero para MUCHAS rutas en una transacción.
 

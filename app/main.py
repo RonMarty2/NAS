@@ -1013,6 +1013,7 @@ def _start_catalog_update(limit):
                     "current": update.get("current", ""),
                 })
 
+            catalog.backfill_series_episode_numbers()  # rellena SxxExx faltantes de importaciones viejas
             enriched = catalog.enrich_unmatched(limit=None, progress=push)  # completa todo
             enriched_series = catalog.enrich_unmatched_series(limit=None, progress=push)  # idem series
             result = catalog.update_catalog(limit=limit, progress=push)
