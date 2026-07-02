@@ -906,16 +906,20 @@ def _episode_numbers(filename):
 
 
 def backfill_series_episode_numbers():
-    """Rellena temporada/episodio de episodios importados ANTES de que esas
-    columnas existieran (el re-escaneo los salta por 'sin cambios', así que
-    nunca se completaban solos). Sin ese dato, el progreso de la serie no los
-    cuenta y muestra 'faltan' episodios que sí están en el disco."""
+    """Rellena/corrige temporada-episodio de todos los episodios de serie.
+
+    SIEMPRE recalcula desde el nombre de archivo actual, aunque la fila ya
+    tenga un valor guardado: si se importó con una versión vieja del
+    detector (antes de reconocer 'Capítulo X', archivos dobles, temporadas
+    por año...) ese dato quedaba mal para siempre, porque el re-escaneo no
+    lo tocaba de nuevo al no haber cambios en el archivo. Así cualquier
+    mejora futura del detector se aplica también a lo ya importado."""
     updates = []
     for r in db.list_catalog_files(missing=False):
-        if r["media_type"] != "series" or r["season"] is not None:
+        if r["media_type"] != "series":
             continue
         season, episode = _parse_season_episode(r["filename"], r["path"])
-        if season is not None and episode is not None:
+        if season is not None and episode is not None and (season, episode) != (r["season"], r["episode"]):
             updates.append((season, episode, r["path"]))
     return db.set_catalog_episode_numbers(updates)
 
