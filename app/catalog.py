@@ -924,6 +924,48 @@ def backfill_series_episode_numbers():
     return db.set_catalog_episode_numbers(updates)
 
 
+def fix_series_folder_outliers():
+    """Corrige episodios 'secuestrados' por otra serie: un archivo cuyo TÍTULO
+    de capítulo engañó al buscador (p.ej. 'Malcolm ... El baile de Aida' quedó
+    asignado a la serie Aída) aparece como faltante en su serie real, y nada
+    lo re-revisa porque ya tiene un tmdb_id (aunque sea el equivocado).
+
+    Regla genérica y conservadora: en una carpeta de serie con >=10 episodios
+    reconocidos donde >=80% apuntan a la MISMA serie, los grupos sueltos de
+    1-2 archivos que apuntan a OTRA serie heredan la identidad de la carpeta.
+    Grupos de 3+ archivos se respetan (p.ej. un reboot o miniserie que convive
+    a propósito en la misma carpeta). Sin red: solo datos ya guardados."""
+    groups = {}  # (root, carpeta) -> {tmdb_id: [rows]}
+    for r in db.list_catalog_files(missing=False):
+        if r["media_type"] != "series" or not _int(r["tmdb_id"]):
+            continue
+        root = r["import_root"] or _nearest_root(r["path"]) or os.path.dirname(r["path"])
+        key = (root, _series_top_folder(r["path"], root).lower())
+        groups.setdefault(key, {}).setdefault(_int(r["tmdb_id"]), []).append(r)
+
+    fixed = 0
+    for counts in groups.values():
+        total = sum(len(rows) for rows in counts.values())
+        if len(counts) < 2 or total < 10:
+            continue
+        best_id, best_rows = max(counts.items(), key=lambda kv: len(kv[1]))
+        if len(best_rows) < 0.8 * total:
+            continue
+        proto = best_rows[0]
+        for tid, outliers in counts.items():
+            if tid == best_id or len(outliers) > 2:
+                continue
+            fixed += db.update_catalog_files_bulk(
+                [r["path"] for r in outliers],
+                tmdb_id=best_id, media_type="series",
+                title=proto["title"], year=proto["year"],
+                poster_url=proto["poster_url"], overview=proto["overview"],
+                match_attempts=0)
+    if fixed:
+        invalidate_build()
+    return fixed
+
+
 def enrich_unmatched_series(limit=None, progress=None):
     """Reintenta reconocer las SERIES importadas sin tmdb_id, por carpeta.
 

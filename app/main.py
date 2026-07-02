@@ -990,6 +990,7 @@ def _start_catalog_import(folder, limit):
             # reconocía nada".
             push({"done": 0, "total": 0, "current": "", "message": "Reconociendo lo importado..."})
             catalog.backfill_series_episode_numbers()
+            catalog.fix_series_folder_outliers()  # episodios 'secuestrados' por otra serie
             auto = catalog.enrich_unmatched(limit=None, progress=push)
             auto += catalog.enrich_unmatched_series(limit=None, progress=push)
             if auto:
@@ -1038,6 +1039,7 @@ def _start_catalog_update(limit):
                 })
 
             catalog.backfill_series_episode_numbers()  # rellena SxxExx faltantes de importaciones viejas
+            catalog.fix_series_folder_outliers()  # episodios 'secuestrados' por otra serie
             enriched = catalog.enrich_unmatched(limit=None, progress=push)  # completa todo
             enriched_series = catalog.enrich_unmatched_series(limit=None, progress=push)  # idem series
             result = catalog.update_catalog(limit=limit, progress=push)
