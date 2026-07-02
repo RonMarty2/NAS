@@ -29,11 +29,16 @@
           {% for show in missing.shows %}
             <article class="missing-show" data-album-card>
               <div class="missing-show-poster">
-                {% if show.poster_url %}<img src="{{ show.poster_url }}" alt="" loading="lazy">{% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
+                {% if show.poster_url %}
+                  <img src="{{ show.poster_url }}" alt="" loading="lazy" class="poster-zoom" data-title="{{ show.title }}{% if show.year %} ({{ show.year }}){% endif %}">
+                {% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
               </div>
               <div class="missing-show-info">
                 <h3><a href="/catalog/series?tmdb_id={{ show.tmdb_id }}" style="color:inherit;">{{ show.title }}{% if show.year %} ({{ show.year }}){% endif %}</a></h3>
-                <p><span class="album-chip warn">Faltan {{ show.missing_total }}</span></p>
+                <p>
+                  <span class="album-chip warn">Faltan {{ show.missing_total }}</span>
+                  <button type="button" class="btn btn-secondary copy-btn" data-copy="{{ show.title }}{% if show.year %} {{ show.year }}{% endif %}">📋 Copiar nombre</button>
+                </p>
                 {% for season in show.seasons %}
                   <small class="missing-text">
                     <strong>{{ season.name }}:</strong>
@@ -61,10 +66,13 @@
           {% for m in missing.movies %}
             <article class="album-movie" data-album-card>
               <div class="album-movie-poster">
-                {% if m.poster_url %}<img src="{{ m.poster_url }}" alt="" loading="lazy">{% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
+                {% if m.poster_url %}
+                  <img src="{{ m.poster_url }}" alt="" loading="lazy" class="poster-zoom" data-title="{{ m.title }}{% if m.year %} ({{ m.year }}){% endif %}">
+                {% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
               </div>
               <strong>{{ m.title }}</strong>
               <small>{{ m.year or "" }} · {{ m.collection }}</small>
+              <button type="button" class="btn btn-secondary copy-btn" data-copy="{{ m.title }}{% if m.year %} {{ m.year }}{% endif %}">📋 Copiar nombre</button>
             </article>
           {% endfor %}
         </div>
@@ -81,7 +89,9 @@
           {% for m in missing.upcoming %}
             <article class="album-movie" data-album-card>
               <div class="album-movie-poster">
-                {% if m.poster_url %}<img src="{{ m.poster_url }}" alt="" loading="lazy">{% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
+                {% if m.poster_url %}
+                  <img src="{{ m.poster_url }}" alt="" loading="lazy" class="poster-zoom" data-title="{{ m.title }}{% if m.year %} ({{ m.year }}){% endif %}">
+                {% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
               </div>
               <strong>{{ m.title }}</strong>
               <small>Estreno: {{ m.release_date or "sin fecha" }} · {{ m.collection }}</small>
@@ -92,13 +102,78 @@
     {% endif %}
   </div>
 
+  <!-- Visor de póster grande: clic en cualquier póster lo abre, clic en cualquier lado lo cierra -->
+  <div id="posterModal" onclick="this.classList.remove('open')">
+    <div id="posterModalBox">
+      <img id="posterModalImg" src="" alt="">
+      <p id="posterModalTitle"></p>
+    </div>
+  </div>
+
   <style>
     .missing-show-list { display: flex; flex-direction: column; gap: 12px; }
     .missing-show { display: flex; gap: 14px; padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.03); }
     .missing-show-poster { width: 72px; flex: 0 0 72px; }
     .missing-show-poster img { width: 100%; border-radius: 8px; display: block; }
     .missing-show-info h3 { margin: 0 0 4px; }
-    .missing-show-info p { margin: 0 0 6px; }
+    .missing-show-info p { margin: 0 0 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .missing-show-info small { display: block; margin-bottom: 2px; }
+    .poster-zoom { cursor: zoom-in; }
+    .copy-btn { font-size: 0.78rem; padding: 4px 10px; }
+    .copy-btn.copied { background: rgba(120, 220, 150, 0.25); color: #7fdc96; }
+    #posterModal {
+      display: none; position: fixed; inset: 0; z-index: 999;
+      background: rgba(0,0,0,0.85); cursor: zoom-out;
+      align-items: center; justify-content: center;
+    }
+    #posterModal.open { display: flex; }
+    #posterModalBox { text-align: center; max-width: 92vw; }
+    #posterModalImg { max-height: 82vh; max-width: 92vw; border-radius: 12px; box-shadow: 0 8px 40px rgba(0,0,0,0.7); }
+    #posterModalTitle { color: #fff; margin-top: 10px; font-weight: 600; }
   </style>
+
+  <script>
+    // Póster grande: usa la imagen en mejor calidad de TMDB (w780 en vez de w342)
+    document.addEventListener("click", function (ev) {
+      var img = ev.target.closest(".poster-zoom");
+      if (img) {
+        var modal = document.getElementById("posterModal");
+        document.getElementById("posterModalImg").src = img.src.replace("/w342/", "/w780/");
+        document.getElementById("posterModalTitle").textContent = img.dataset.title || "";
+        modal.classList.add("open");
+        return;
+      }
+      var btn = ev.target.closest(".copy-btn");
+      if (btn) {
+        copyText(btn.dataset.copy || "", btn);
+      }
+    });
+
+    // Copiar al portapapeles compatible con http:// (la API moderna solo
+    // funciona con candado/https, y la app corre en la red local sin él).
+    function copyText(text, btn) {
+      function done(ok) {
+        var original = "📋 Copiar nombre";
+        btn.textContent = ok ? "✅ Copiado" : "❌ No se pudo";
+        btn.classList.add("copied");
+        setTimeout(function () { btn.textContent = original; btn.classList.remove("copied"); }, 1600);
+      }
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(fallback(text)); });
+      } else {
+        done(fallback(text));
+      }
+      function fallback(t) {
+        var ta = document.createElement("textarea");
+        ta.value = t;
+        ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.focus(); ta.select();
+        var ok = false;
+        try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+        document.body.removeChild(ta);
+        return ok;
+      }
+    }
+  </script>
 {% endblock %}
