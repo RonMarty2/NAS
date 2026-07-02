@@ -60,7 +60,10 @@ def _enrich(item_id, path, ident):
     }
 
     if media_type in ("movie", "series"):
-        match = tmdb.best_match(ident.get("title"), media_type, ident.get("year"))
+        try:
+            match = tmdb.best_match(ident.get("title"), media_type, ident.get("year"))
+        except tmdb.TmdbUnavailable:
+            match = None  # red caída: se queda con el título del nombre; se reintenta luego
         if match:
             fields.update({
                 "tmdb_id": match["tmdb_id"],
@@ -168,6 +171,9 @@ def refresh_pending_metadata():
             if query:
                 try:
                     match = tmdb.best_match(query, mt, it["detected_year"])
+                except tmdb.TmdbUnavailable:
+                    tmdb_ok = False  # red caída: no gastar intentos ni seguir esperando timeouts
+                    continue
                 except Exception:
                     match = None
                 if match:

@@ -43,8 +43,17 @@ def _normalize(result, media_type):
     }
 
 
+class TmdbUnavailable(Exception):
+    """TMDB no respondió (red caída / servicio saturado).
+
+    Es DISTINTO de 'no hay resultados': antes ambos devolvían lista vacía y
+    un fallo de internet quemaba los reintentos de todo el catálogo como si
+    TMDB hubiera dicho 'no conozco esa serie'."""
+
+
 def search(query, media_type, year=None):
-    """Busca en TMDB. media_type: 'movie' o 'series'. Devuelve lista normalizada."""
+    """Busca en TMDB. media_type: 'movie' o 'series'. Devuelve lista normalizada.
+    Lanza TmdbUnavailable si la red/servicio falló (no confundir con [])."""
     if not configured() or not query:
         return []
     tmdb_type = "movie" if media_type == "movie" else "tv"
@@ -55,8 +64,8 @@ def search(query, media_type, year=None):
         r = requests.get(f"{BASE}/search/{tmdb_type}", params=params, timeout=8)
         r.raise_for_status()
         results = r.json().get("results", [])
-    except requests.RequestException:
-        return []
+    except requests.RequestException as exc:
+        raise TmdbUnavailable(str(exc))
     return [_normalize(x, media_type) for x in results[:10]]
 
 

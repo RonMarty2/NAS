@@ -367,11 +367,14 @@ def search_candidates(query, media_type="movie"):
     query = (query or "").strip()
     if not query:
         return []
-    results = tmdb.search(query, media_type)
-    if not results:
-        plain = _deaccent(query)
-        if plain and plain != query:
-            results = tmdb.search(plain, media_type)
+    try:
+        results = tmdb.search(query, media_type)
+        if not results:
+            plain = _deaccent(query)
+            if plain and plain != query:
+                results = tmdb.search(plain, media_type)
+    except tmdb.TmdbUnavailable:
+        return []  # red caída: la página muestra 'sin resultados' en vez de romperse
     return results
 
 
@@ -784,6 +787,11 @@ def enrich_unmatched(limit=None, progress=None):
         if title:
             try:
                 match = tmdb.best_match(title, "movie", row["year"])
+            except tmdb.TmdbUnavailable:
+                # Red/TMDB caídos: NO gastar intentos (no es culpa del título)
+                # y NO seguir fila por fila esperando timeouts. Se reintenta
+                # en la próxima pasada, gratis.
+                break
             except Exception:
                 match = None
         if not match:
@@ -904,6 +912,8 @@ def enrich_unmatched_series(limit=None, progress=None):
         if query:
             try:
                 match = tmdb.best_match(query, "series", rows[0]["year"])
+            except tmdb.TmdbUnavailable:
+                break  # red caída: sin castigo de intentos y sin colgarse serie por serie
             except Exception:
                 match = None
         if not match:
@@ -942,6 +952,7 @@ def import_folder(root, enrich_limit=80, progress=None):
     skipped = 0
     errors = 0
     touched = []  # archivos sin cambios, se marcan como vistos en lote
+    tmdb_down = False  # si la red falla, se sigue escaneando sin TMDB
     enrich_limit = max(0, int(enrich_limit or 0))
     # Precargamos lo ya catalogado en un dict (una consulta) en vez de una
     # consulta por archivo. En bibliotecas grandes eso evita miles de queries.
@@ -977,8 +988,12 @@ def import_folder(root, enrich_limit=80, progress=None):
                 "episode": ident.get("episode"),
             }
             search_query = _query_title_from_filename(filename) or fields["title"]
-            if media_type == "movie" and matched < enrich_limit and tmdb.configured():
-                match = tmdb.best_match(search_query, "movie", fields["year"])
+            if media_type == "movie" and matched < enrich_limit and tmdb.configured() and not tmdb_down:
+                try:
+                    match = tmdb.best_match(search_query, "movie", fields["year"])
+                except tmdb.TmdbUnavailable:
+                    tmdb_down = True  # sigue escaneando SIN red (rápido), sin castigos
+                    match = None
                 if match:
                     fields.update({
                         "tmdb_id": match["tmdb_id"],
@@ -996,8 +1011,12 @@ def import_folder(root, enrich_limit=80, progress=None):
                             if collection_detail:
                                 _set_json(f"collection:{collection['id']}", collection_detail)
                     matched += 1
-            elif media_type == "series" and matched < enrich_limit and tmdb.configured():
-                match = tmdb.best_match(search_query, "series", fields["year"])
+            elif media_type == "series" and matched < enrich_limit and tmdb.configured() and not tmdb_down:
+                try:
+                    match = tmdb.best_match(search_query, "series", fields["year"])
+                except tmdb.TmdbUnavailable:
+                    tmdb_down = True
+                    match = None
                 if match:
                     fields.update({
                         "tmdb_id": match["tmdb_id"],
@@ -1035,7 +1054,8 @@ def import_folder(root, enrich_limit=80, progress=None):
         "matched": matched,
         "skipped": skipped,
         "errors": errors,
-        "message": f"Importacion terminada: {scanned} archivo(s), {matched} reconocido(s), {skipped} ya estaban.",
+        "message": f"Importacion terminada: {scanned} archivo(s), {matched} reconocido(s), {skipped} ya estaban."
+                   + (" ⚠️ TMDB no respondió: se escaneó sin reconocer; vuelve a intentar más tarde." if tmdb_down else ""),
     }
 
 

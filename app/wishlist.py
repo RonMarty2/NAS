@@ -29,4 +29,7 @@ def remove(item_id):
 
 def search(query, media_type="movie"):
     """Busca en TMDB para elegir qué agregar a la lista de deseos."""
-    return tmdb.search(query, media_type)
+    try:
+        return tmdb.search(query, media_type)
+    except tmdb.TmdbUnavailable:
+        return []
