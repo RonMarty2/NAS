@@ -11,7 +11,10 @@ from . import catalog, config, db, filemeta
 
 STATUS_KEY = "health_status"
 RESULT_KEY = "health_result"
-SKIP_DIR_NAMES = {"@eadir", "#recycle", "@tmp", ".trash", "$recycle.bin"}
+SKIP_DIR_NAMES = {
+    "@eadir", "#recycle", "@tmp", ".trash", "$recycle.bin",
+    ".deletedbytmm", "deletedbytmm",
+}
 
 
 def status():
@@ -50,12 +53,49 @@ def _library_roots():
         default = config.default_dir_for(media_type)
         if default:
             roots.add(default)
-    return sorted(r for r in roots if r and os.path.isdir(r))
+    return _dedupe_roots(r for r in roots if r and os.path.isdir(r))
+
+
+def _dedupe_roots(roots):
+    cleaned = []
+    for root in sorted(set(roots), key=lambda p: (len(os.path.realpath(p)), os.path.realpath(p).lower())):
+        try:
+            rr = os.path.realpath(root)
+        except (OSError, TypeError):
+            continue
+        if any(rr == kept or rr.startswith(kept + os.sep) for kept in cleaned):
+            continue
+        cleaned.append(rr)
+    return cleaned
+
+
+def _music_roots():
+    roots = set()
+    default = config.default_dir_for("music")
+    if default:
+        roots.add(default)
+    for root in [p.strip() for p in config.get("library_roots").split(",") if p.strip()]:
+        if "music" in os.path.basename(os.path.normpath(root)).lower():
+            roots.add(root)
+    return sorted(r for r in roots if r)
+
+
+def _is_under(path, root):
+    try:
+        rp = os.path.realpath(path)
+        rr = os.path.realpath(root)
+    except (OSError, TypeError):
+        return False
+    return rp == rr or rp.startswith(rr + os.sep)
+
+
+def _is_music_path(path):
+    return any(_is_under(path, root) for root in _music_roots())
 
 
 def _skip_dir(name):
     low = (name or "").lower()
-    return low in SKIP_DIR_NAMES or low.startswith("@eadir")
+    return low in SKIP_DIR_NAMES or low.startswith("@eadir") or low.startswith(".")
 
 
 def _iter_all_files(root):
@@ -71,16 +111,8 @@ def suggested_roots():
 
 
 def _within_roots(path):
-    try:
-        rp = os.path.realpath(path)
-    except (OSError, TypeError):
-        return False
     for root in _library_roots():
-        try:
-            rr = os.path.realpath(root)
-        except (OSError, TypeError):
-            continue
-        if rp == rr or rp.startswith(rr + os.sep):
+        if _is_under(path, root):
             return True
     return False
 
@@ -131,12 +163,16 @@ def run_scan(progress=None, folder=None):
     # Huérfanos: .nfo/poster/fanart/clearlogo sin ningún video en su misma carpeta.
     orphans = []
     by_dir = {}
+    dirs_with_video = set()
     for path in all_paths:
-        by_dir.setdefault(os.path.dirname(path), []).append(path)
+        folder_path = os.path.dirname(path)
+        by_dir.setdefault(folder_path, []).append(path)
+        if os.path.splitext(path)[1].lower() in video_exts:
+            for parent in _parents_until_roots(folder_path, roots):
+                dirs_with_video.add(parent)
     aux_names = {"poster.jpg", "fanart.jpg", "clearlogo.png", "tvshow.nfo"}
     for folder, paths in by_dir.items():
-        has_video = any(os.path.splitext(p)[1].lower() in video_exts for p in paths)
-        if has_video:
+        if _is_music_path(folder) or folder in dirs_with_video:
             continue
         for p in paths:
             name = os.path.basename(p).lower()
@@ -151,6 +187,31 @@ def run_scan(progress=None, folder=None):
     }
     _set_result(result)
     return result
+
+
+def _parents_until_roots(folder, roots):
+    out = []
+    try:
+        current = os.path.realpath(folder)
+    except (OSError, TypeError):
+        return out
+    real_roots = []
+    for root in roots:
+        try:
+            real_roots.append(os.path.realpath(root))
+        except (OSError, TypeError):
+            continue
+    while current:
+        if not any(current == root or current.startswith(root + os.sep) for root in real_roots):
+            break
+        out.append(current)
+        if any(current == root for root in real_roots):
+            break
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return out
 
 
 def delete_broken(path):

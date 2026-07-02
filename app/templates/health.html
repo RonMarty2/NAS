@@ -75,8 +75,15 @@
           <h2>🧩 Archivos huérfanos</h2>
           <span>{{ result.orphans|length }} archivo(s) sin video asociado</span>
         </div>
+        {% set orphan_limit = 100 %}
+        {% if result.orphans|length > orphan_limit %}
+          <div class="target-warning">
+            <strong>Lista larga</strong>
+            <span>Mostrando los primeros {{ orphan_limit }}. Para revisar mejor, analiza una carpeta concreta.</span>
+          </div>
+        {% endif %}
         <div class="health-list">
-          {% for item in result.orphans %}
+          {% for item in result.orphans[:orphan_limit] %}
             <div class="health-row">
               <div class="health-row-info">
                 <strong>{{ item.path.split('/')[-1] }}</strong>
