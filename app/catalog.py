@@ -13,6 +13,26 @@ STATUS_KEY = "catalog_status"
 CACHE_TTL_SECONDS = 30 * 24 * 60 * 60
 SKIP_DIR_NAMES = {"@eadir", "#recycle", "@tmp", ".trash", "$recycle.bin"}
 
+# TMDB a veces separa una franquicia en varias "collections". Para un album
+# personal eso confunde: Alien sale como completa con solo 4 peliculas aunque
+# Prometheus, Covenant y Romulus sean parte de la saga cinematografica.
+CUSTOM_MOVIE_FRANCHISES = [
+    {
+        "key": "alien-expanded",
+        "name": "Alien - Saga ampliada",
+        "replace_names": {"alien - colección", "alien collection"},
+        "parts": [
+            {"tmdb_id": 348, "title": "Alien: El octavo pasajero", "year": 1979, "release_date": "1979-05-25"},
+            {"tmdb_id": 679, "title": "Aliens: El regreso", "year": 1986, "release_date": "1986-07-18"},
+            {"tmdb_id": 8077, "title": "Alien 3", "year": 1992, "release_date": "1992-05-22"},
+            {"tmdb_id": 8078, "title": "Alien: La resurreccion", "year": 1997, "release_date": "1997-11-12"},
+            {"tmdb_id": 70981, "title": "Prometheus", "year": 2012, "release_date": "2012-05-30"},
+            {"tmdb_id": 126889, "title": "Alien: Covenant", "year": 2017, "release_date": "2017-05-09"},
+            {"tmdb_id": 945961, "title": "Alien: Romulus", "year": 2024, "release_date": "2024-08-13"},
+        ],
+    },
+]
+
 # Caché del catálogo ya armado. build_catalog recorre toda la tabla y parsea el
 # JSON de cada película/saga; con bibliotecas grandes eso es caro y se repetía en
 # cada apertura de la pestaña (y en cada recarga del sondeo durante una
@@ -130,6 +150,18 @@ def update_catalog(limit=60, progress=None):
         if progress:
             progress({"done": queries, "total": total + len(collection_ids), "current": f"Saga {collection_id}"})
 
+    for movie_id in _custom_franchise_movie_ids():
+        if queries >= limit:
+            break
+        if not _cache_stale(f"movie:{movie_id}"):
+            continue
+        detail = tmdb.movie_details(movie_id)
+        if detail:
+            _set_json(f"movie:{movie_id}", detail)
+        queries += 1
+        if progress:
+            progress({"done": queries, "total": total + len(collection_ids), "current": f"Pelicula {movie_id}"})
+
     return {
         "done": queries,
         "total": total,
@@ -157,7 +189,9 @@ def _build_catalog_uncached():
     catalog_rows = db.list_catalog_files(missing=False)
     items = owned_movie_entries(done_items=done_items, catalog_rows=catalog_rows)
     owned_by_id = {_int(item["tmdb_id"]): item for item in items if _int(item["tmdb_id"])}
-    movie_cache = db.get_catalog_cache_many(f"movie:{_int(item['tmdb_id'])}" for item in items if _int(item["tmdb_id"]))
+    movie_cache_keys = {f"movie:{_int(item['tmdb_id'])}" for item in items if _int(item["tmdb_id"])}
+    movie_cache_keys.update(f"movie:{tmdb_id}" for tmdb_id in _custom_franchise_movie_ids())
+    movie_cache = db.get_catalog_cache_many(movie_cache_keys)
     movie_details = {}
     collection_ids = set()
     for item in items:
@@ -213,6 +247,8 @@ def _build_catalog_uncached():
         if row["media_type"] == "movie" and not _int(row["tmdb_id"]):
             uncached += 1
             standalone.append(_movie_from_item(_entry_from_catalog_file(row), owned=True))
+
+    _apply_custom_franchises(collections, movie_cache, owned_by_id)
 
     for entry in collections.values():
         unique = {}
@@ -280,6 +316,74 @@ def _build_catalog_uncached():
         "by_folder": by_folder,
         "unmatched": unmatched[:120],
         "unmatched_total": len(unmatched),
+    }
+
+
+def _custom_franchise_movie_ids():
+    ids = []
+    for franchise in CUSTOM_MOVIE_FRANCHISES:
+        for part in franchise.get("parts") or []:
+            tmdb_id = _int(part.get("tmdb_id"))
+            if tmdb_id:
+                ids.append(tmdb_id)
+    return ids
+
+
+def _apply_custom_franchises(collections, movie_cache, owned_by_id):
+    for franchise in CUSTOM_MOVIE_FRANCHISES:
+        part_ids = [_int(part.get("tmdb_id")) for part in franchise.get("parts") or []]
+        part_ids = [tmdb_id for tmdb_id in part_ids if tmdb_id]
+        if not any(tmdb_id in owned_by_id for tmdb_id in part_ids):
+            continue
+
+        _remove_replaced_collections(collections, franchise, set(part_ids))
+        entry = {
+            "id": f"custom:{franchise['key']}",
+            "name": franchise["name"],
+            "poster_url": None,
+            "backdrop_url": None,
+            "parts": [],
+            "owned_count": 0,
+            "total_count": 0,
+            "missing_count": 0,
+            "custom": True,
+        }
+        fallback_by_id = {
+            _int(part.get("tmdb_id")): part
+            for part in franchise.get("parts") or []
+            if _int(part.get("tmdb_id"))
+        }
+        for tmdb_id in part_ids:
+            detail = _json_from_row(movie_cache.get(f"movie:{tmdb_id}"))
+            if not detail:
+                detail = _fallback_franchise_detail(fallback_by_id[tmdb_id])
+            part = _part_with_owned(detail, owned_by_id)
+            entry["parts"].append(part)
+            if not entry["poster_url"] and part.get("poster_url"):
+                entry["poster_url"] = part["poster_url"]
+        collections[entry["id"]] = entry
+
+
+def _remove_replaced_collections(collections, franchise, part_ids):
+    replace_names = {(_deaccent(name).lower().strip()) for name in franchise.get("replace_names", set())}
+    remove_keys = []
+    for key, entry in collections.items():
+        name = _deaccent(entry.get("name") or "").lower().strip()
+        ids = {_int(part.get("tmdb_id")) for part in entry.get("parts") or [] if _int(part.get("tmdb_id"))}
+        if name in replace_names or (ids and ids.issubset(part_ids) and "alien" in name):
+            remove_keys.append(key)
+    for key in remove_keys:
+        collections.pop(key, None)
+
+
+def _fallback_franchise_detail(part):
+    return {
+        "tmdb_id": _int(part.get("tmdb_id")),
+        "title": part.get("title") or "",
+        "year": part.get("year"),
+        "release_date": part.get("release_date") or "",
+        "poster_url": None,
+        "overview": "",
     }
 
 
