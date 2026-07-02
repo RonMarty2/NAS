@@ -144,7 +144,8 @@
         </div>
         <div class="album-saga-grid">
           {% for saga in catalog.collections %}
-            <article class="album-saga" data-album-card>
+            <article class="album-saga" data-album-card
+                     data-search="{{ saga.name }} {% for part in saga.parts %} {{ part.title }} {{ part.year or '' }} {{ part.release_date or '' }}{% endfor %}">
               <div class="album-saga-cover">
                 {% if saga.poster_url %}
                   <img src="{{ saga.poster_url }}" alt="">
@@ -200,7 +201,8 @@
         </div>
         <div class="album-movie-grid">
           {% for movie in catalog.standalone %}
-            <article class="album-movie" data-album-card>
+            <article class="album-movie" data-album-card
+                     data-search="{{ movie.title }} {{ movie.year or '' }}">
               <div class="album-movie-poster">
                 {% if movie.poster_url %}
                   <img src="{{ movie.poster_url }}" alt="">
@@ -225,7 +227,8 @@
         </div>
         <div class="album-saga-grid">
           {% for show in catalog.series_progress %}
-            <article class="album-saga" data-album-card>
+            <article class="album-saga" data-album-card
+                     data-search="{{ show.title }} {{ show.year or '' }} {% for season in show.seasons %} {{ season.name }}{% endfor %}">
               <div class="album-saga-cover">
                 {% if show.poster_url %}
                   <img src="{{ show.poster_url }}" alt="">
@@ -280,7 +283,8 @@
         </div>
         <div class="album-movie-grid">
           {% for show in catalog.series %}
-            <article class="album-movie" data-album-card>
+            <article class="album-movie" data-album-card
+                     data-search="{{ show.title }} {{ show.year or '' }}">
               <div class="album-movie-poster">
                 {% if show.poster_url %}
                   <img src="{{ show.poster_url }}" alt="">
@@ -310,7 +314,8 @@
               </div>
               <div class="album-movie-grid discover-grid">
                 {% for movie in sec.movies %}
-                  <article class="album-movie {{ 'owned' if movie.owned else 'missing' }}" data-album-card>
+                  <article class="album-movie {{ 'owned' if movie.owned else 'missing' }}" data-album-card
+                           data-search="{{ movie.title }} {{ movie.year or '' }} {{ group.name }} {{ sec.title }}">
                     <div class="album-movie-poster">
                       {% if movie.poster_url %}
                         <img src="{{ movie.poster_url }}" alt="" loading="lazy">
@@ -381,7 +386,8 @@
           </div>
           <div class="album-movie-grid">
             {% for movie in folder['items'] %}
-              <article class="album-movie" data-album-card>
+              <article class="album-movie" data-album-card
+                       data-search="{{ movie.title }} {{ movie.year or '' }} {{ folder.name }} {{ folder.root }}">
                 <div class="album-movie-poster">
                   {% if movie.poster_url %}
                     <img src="{{ movie.poster_url }}" alt="" loading="lazy">
@@ -437,7 +443,7 @@
       }
 
       cards.forEach(function (card, index) {
-        card.dataset.searchText = normalize(card.textContent);
+        card.dataset.searchText = normalize((card.getAttribute("data-search") || "") + " " + card.textContent);
         card.style.setProperty("--album-order", Math.min(index, 18));
       });
 
