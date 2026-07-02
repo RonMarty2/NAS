@@ -254,7 +254,11 @@
                         <span>{{ season.owned_count }}/{{ season.total_count }}</span>
                       </div>
                       {% if season.missing_episodes %}
-                        <small class="missing-text">Faltan episodios: {{ season.missing_episodes|join(", ") }}</small>
+                        {% if season.owned_count == 0 %}
+                          <small class="missing-text">Te falta la temporada completa ({{ season.total_count }} episodios)</small>
+                        {% else %}
+                          <small class="missing-text">Faltan episodios: {{ season.missing_episodes[:15]|join(", ") }}{% if season.missing_episodes|length > 15 %} … y {{ season.missing_episodes|length - 15 }} más{% endif %}</small>
+                        {% endif %}
                       {% elif season.total_count %}
                         <small>Completa</small>
                       {% endif %}

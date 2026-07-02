@@ -73,7 +73,7 @@
       <div class="scan-banner {{ 'running' if catalog_notice.running else 'done' }}">
         <strong>{% if catalog_notice.running %}Actualizando catalogo{% else %}Catalogo{% endif %}</strong>
         <span>{{ catalog_notice.message }}</span>
-        {% if catalog_notice.total %}
+        {% if catalog_notice.running and catalog_notice.total %}
           <progress class="dedup-progress" value="{{ catalog_notice.done or 0 }}" max="{{ catalog_notice.total }}"></progress>
           <small>Avance: {{ catalog_notice.done or 0 }}/{{ catalog_notice.total }}</small>
         {% endif %}
