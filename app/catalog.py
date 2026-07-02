@@ -823,24 +823,59 @@ def enrich_unmatched(limit=None, progress=None):
 
 _SE_RE = re.compile(r"[Ss](\d{1,4})[\s._-]*[Ee](\d{1,3})")
 _X_RE = re.compile(r"\b(\d{1,2})x(\d{1,3})\b")
+# Formatos comunes en español y otros que antes quedaban 'sin número':
+_CAP_RE = re.compile(r"\b[Cc]ap(?:[ií]tulo)?[\s._-]*(\d{1,4})\b")
+_EP_WORD_RE = re.compile(r"\b[Ee]p(?:isodio|isode)?[\s._-]*(\d{1,4})\b")
+_FOLDER_SEASON_RE = re.compile(r"(?:season|temporada|temp)[\s._-]*(\d{1,4})", re.IGNORECASE)
+_LEAD_NUM_RE = re.compile(r"^\s*(\d{1,3})\b")
 
 
-def _parse_season_episode(filename):
-    """Saca (temporada, episodio) del nombre: 'S10E03', '5x11'... Regex primero
-    (rápido); guessit con guardián solo como respaldo."""
+def _folder_season(path):
+    """Temporada según la CARPETA que contiene al archivo: 'Season 2',
+    'Temporada 3', 'Season 1973'. Se usa cuando el nombre del archivo no trae
+    la temporada (p.ej. 'Temporada 2/05 - El regreso.mkv')."""
+    parts = (path or "").replace("\\", "/").split("/")[:-1]
+    for part in reversed(parts):
+        m = _FOLDER_SEASON_RE.search(part)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _parse_season_episode(filename, path=None):
+    """Saca (temporada, episodio) del nombre: 'S10E03', '5x11', 'Capítulo 12',
+    'Episodio 5', 'Temporada 2/05 - título.mkv'... Regex primero (rápido);
+    guessit con guardián solo como respaldo."""
     m = _SE_RE.search(filename or "") or _X_RE.search(filename or "")
     if m:
         return int(m.group(1)), int(m.group(2))
+    folder = _folder_season(path)
+    # 'Capítulo 12' / 'Cap.101' / 'Episodio 5' (muy común en español).
+    # 'Cap.101' sin carpeta de temporada suele significar 1x01.
+    m = _CAP_RE.search(filename or "") or _EP_WORD_RE.search(filename or "")
+    if m:
+        num = int(m.group(1))
+        if num >= 100 and folder is None:
+            return num // 100, num % 100
+        return (folder if folder is not None else 1), num
     g = identify.guessit_safe(filename or "")
     s, e = g.get("season"), g.get("episode")
     if isinstance(s, list):
         s = s[0] if s else None
     if isinstance(e, list):
         e = e[0] if e else None
+    if e is not None and s is None:
+        s = folder if folder is not None else 1  # anime/numeración corrida
     try:
         return int(s), int(e)
     except (TypeError, ValueError):
-        return None, None
+        pass
+    # Último recurso: carpeta de temporada + número al inicio ('05 - título')
+    if folder is not None:
+        m = _LEAD_NUM_RE.match(filename or "")
+        if m:
+            return folder, int(m.group(1))
+    return None, None
 
 
 _E_EXTRA = re.compile(r"[\s._-]*[Ee](\d{1,3})")
@@ -879,7 +914,7 @@ def backfill_series_episode_numbers():
     for r in db.list_catalog_files(missing=False):
         if r["media_type"] != "series" or r["season"] is not None:
             continue
-        season, episode = _parse_season_episode(r["filename"])
+        season, episode = _parse_season_episode(r["filename"], r["path"])
         if season is not None and episode is not None:
             updates.append((season, episode, r["path"]))
     return db.set_catalog_episode_numbers(updates)
