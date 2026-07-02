@@ -157,12 +157,12 @@
                 <div class="album-saga-top">
                   <div>
                     <h3>{{ saga.name }}</h3>
-                    <p>{{ saga.owned_count }} de {{ saga.total_count }} en tu biblioteca</p>
+                    <p>{{ saga.owned_count }} de {{ saga.total_count }} en tu biblioteca Â· {{ 'saga ampliada' if saga.custom else 'colecciÃ³n TMDB' }}</p>
                   </div>
                   {% if saga.missing_count %}
                     <span class="album-chip warn">Faltan {{ saga.missing_count }}</span>
                   {% else %}
-                    <span class="album-chip ok">Completa</span>
+                    <span class="album-chip ok">{{ 'Completa ampliada' if saga.custom else 'Completa TMDB' }}</span>
                   {% endif %}
                 </div>
                 <div class="album-progress"><span style="width: {{ (saga.owned_count / saga.total_count * 100) if saga.total_count else 0 }}%"></span></div>

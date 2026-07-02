@@ -12,26 +12,8 @@ from .metadata import tmdb
 STATUS_KEY = "catalog_status"
 CACHE_TTL_SECONDS = 30 * 24 * 60 * 60
 SKIP_DIR_NAMES = {"@eadir", "#recycle", "@tmp", ".trash", "$recycle.bin"}
-
-# TMDB a veces separa una franquicia en varias "collections". Para un album
-# personal eso confunde: Alien sale como completa con solo 4 peliculas aunque
-# Prometheus, Covenant y Romulus sean parte de la saga cinematografica.
-CUSTOM_MOVIE_FRANCHISES = [
-    {
-        "key": "alien-expanded",
-        "name": "Alien - Saga ampliada",
-        "replace_names": {"alien - colección", "alien collection"},
-        "parts": [
-            {"tmdb_id": 348, "title": "Alien: El octavo pasajero", "year": 1979, "release_date": "1979-05-25"},
-            {"tmdb_id": 679, "title": "Aliens: El regreso", "year": 1986, "release_date": "1986-07-18"},
-            {"tmdb_id": 8077, "title": "Alien 3", "year": 1992, "release_date": "1992-05-22"},
-            {"tmdb_id": 8078, "title": "Alien: La resurreccion", "year": 1997, "release_date": "1997-11-12"},
-            {"tmdb_id": 70981, "title": "Prometheus", "year": 2012, "release_date": "2012-05-30"},
-            {"tmdb_id": 126889, "title": "Alien: Covenant", "year": 2017, "release_date": "2017-05-09"},
-            {"tmdb_id": 945961, "title": "Alien: Romulus", "year": 2024, "release_date": "2024-08-13"},
-        ],
-    },
-]
+FRANCHISES_PATH = os.path.join(os.path.dirname(__file__), "franchises.json")
+_franchise_cache = None
 
 # Caché del catálogo ya armado. build_catalog recorre toda la tabla y parsea el
 # JSON de cada película/saga; con bibliotecas grandes eso es caro y se repetía en
@@ -321,7 +303,7 @@ def _build_catalog_uncached():
 
 def _custom_franchise_movie_ids():
     ids = []
-    for franchise in CUSTOM_MOVIE_FRANCHISES:
+    for franchise in _custom_movie_franchises():
         for part in franchise.get("parts") or []:
             tmdb_id = _int(part.get("tmdb_id"))
             if tmdb_id:
@@ -329,8 +311,51 @@ def _custom_franchise_movie_ids():
     return ids
 
 
+def _custom_movie_franchises():
+    global _franchise_cache
+    if _franchise_cache is not None:
+        return _franchise_cache
+    try:
+        with open(FRANCHISES_PATH, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        _franchise_cache = []
+        return _franchise_cache
+
+    franchises = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "").strip()
+        name = str(item.get("name") or "").strip()
+        parts = []
+        for part in item.get("parts") or []:
+            if not isinstance(part, dict):
+                continue
+            tmdb_id = _int(part.get("tmdb_id"))
+            if not tmdb_id:
+                continue
+            parts.append({
+                "tmdb_id": tmdb_id,
+                "title": str(part.get("title") or "").strip(),
+                "year": part.get("year"),
+                "release_date": str(part.get("release_date") or "").strip(),
+            })
+        if not key or not name or not parts:
+            continue
+        franchises.append({
+            "key": key,
+            "name": name,
+            "replace_names": {str(name) for name in (item.get("replace_names") or []) if str(name).strip()},
+            "replace_if_subset": item.get("replace_if_subset", True) is not False,
+            "parts": parts,
+        })
+    _franchise_cache = franchises
+    return _franchise_cache
+
+
 def _apply_custom_franchises(collections, movie_cache, owned_by_id):
-    for franchise in CUSTOM_MOVIE_FRANCHISES:
+    for franchise in _custom_movie_franchises():
         part_ids = [_int(part.get("tmdb_id")) for part in franchise.get("parts") or []]
         part_ids = [tmdb_id for tmdb_id in part_ids if tmdb_id]
         if not any(tmdb_id in owned_by_id for tmdb_id in part_ids):
@@ -366,11 +391,12 @@ def _apply_custom_franchises(collections, movie_cache, owned_by_id):
 
 def _remove_replaced_collections(collections, franchise, part_ids):
     replace_names = {(_deaccent(name).lower().strip()) for name in franchise.get("replace_names", set())}
+    replace_if_subset = franchise.get("replace_if_subset", True)
     remove_keys = []
     for key, entry in collections.items():
         name = _deaccent(entry.get("name") or "").lower().strip()
         ids = {_int(part.get("tmdb_id")) for part in entry.get("parts") or [] if _int(part.get("tmdb_id"))}
-        if name in replace_names or (ids and ids.issubset(part_ids) and "alien" in name):
+        if name in replace_names or (replace_if_subset and ids and ids.issubset(part_ids)):
             remove_keys.append(key)
     for key in remove_keys:
         collections.pop(key, None)
