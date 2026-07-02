@@ -405,7 +405,10 @@ def apply_manual_match(path, tmdb_id, media_type):
                       match_attempts=0)
         targets = []
         for r in db.list_catalog_files(missing=False):
-            if r["media_type"] != "series":
+            # Incluye también archivos marcados como 'movie' dentro de la
+            # carpeta de la serie (especiales mal clasificados): al corregir
+            # la serie se absorben y dejan de salir como tarjeta suelta.
+            if r["media_type"] not in ("movie", "series"):
                 continue
             r_root = r["import_root"] or _nearest_root(r["path"]) or os.path.dirname(r["path"])
             if r_root == root and _series_top_folder(r["path"], r_root).lower() == folder:
@@ -840,6 +843,33 @@ def _parse_season_episode(filename):
         return None, None
 
 
+_E_EXTRA = re.compile(r"[\s._-]*[Ee](\d{1,3})")
+
+
+def _episode_numbers(filename):
+    """Todos los (temporada, episodio) que contiene el NOMBRE de un archivo.
+
+    Hay archivos dobles: un solo video con dos capítulos ('S01E16 S01E17',
+    'S01E01E02', '1x18 1x19'). Antes solo se contaba el primero y el segundo
+    salía como 'te falta' aunque sí lo tienes dentro de ese archivo."""
+    name = filename or ""
+    pairs = set()
+    for m in _SE_RE.finditer(name):
+        season = int(m.group(1))
+        pairs.add((season, int(m.group(2))))
+        pos = m.end()
+        while True:
+            m2 = _E_EXTRA.match(name, pos)
+            if not m2:
+                break
+            pairs.add((season, int(m2.group(1))))
+            pos = m2.end()
+    if not pairs:
+        for m in _X_RE.finditer(name):
+            pairs.add((int(m.group(1)), int(m.group(2))))
+    return pairs
+
+
 def backfill_series_episode_numbers():
     """Rellena temporada/episodio de episodios importados ANTES de que esas
     columnas existieran (el re-escaneo los salta por 'sin cambios', así que
@@ -1148,9 +1178,14 @@ def owned_episode_map(done_series_items=None, catalog_rows=None):
     catalog_rows = db.list_catalog_files(missing=False) if catalog_rows is None else catalog_rows
     for it in done_series_items:
         _add(it["tmdb_id"], it["season"], it["episode"])
+        for season, ep in _episode_numbers(it["filename"]):
+            _add(it["tmdb_id"], season, ep)
     for row in catalog_rows:
         if row["media_type"] == "series":
             _add(row["tmdb_id"], row["season"], row["episode"])
+            # Archivos dobles (S01E16 S01E17): cuentan TODOS sus capítulos
+            for season, ep in _episode_numbers(row["filename"]):
+                _add(row["tmdb_id"], season, ep)
     return owned
 
 
@@ -1162,6 +1197,25 @@ def _series_title_poster(tmdb_id, items_by_id, rows_by_id):
     if row:
         return (row["title"] or "", row["poster_url"])
     return ("", None)
+
+
+def _remap_year_seasons(owned_seasons, seasons_detail):
+    """Series organizadas por AÑO en vez de nº de temporada ('Season 1973',
+    'S1973E11' de El Chavo): el archivo dice temporada 1973 pero TMDB la llama
+    'Temporada 1'. Convierte el año al nº real usando el año de emisión de
+    cada temporada. Si no hay coincidencia, se deja como está."""
+    year_to_num = {}
+    for s in seasons_detail or []:
+        y = (s.get("air_date") or "")[:4]
+        if y.isdigit():
+            year_to_num.setdefault(int(y), s["season_number"])
+    if not year_to_num:
+        return owned_seasons
+    out = {}
+    for season, eps in owned_seasons.items():
+        num = year_to_num.get(season, season) if season >= 1900 else season
+        out.setdefault(num, set()).update(eps)
+    return out
 
 
 def series_progress(catalog_rows=None):
@@ -1196,7 +1250,7 @@ def series_progress(catalog_rows=None):
         if not detail:
             uncached_ids.append(tmdb_id)
             continue
-        owned_seasons = episodes.get(tmdb_id, {})
+        owned_seasons = _remap_year_seasons(episodes.get(tmdb_id, {}), detail.get("seasons"))
         seasons = []
         owned_total = 0
         expected_total = 0
@@ -1228,6 +1282,127 @@ def series_progress(catalog_rows=None):
         })
     out.sort(key=lambda s: (s["missing_total"] == 0, (s["title"] or "").lower()))
     return out, uncached_ids
+
+
+def series_episode_detail(tmdb_id):
+    """Detalle de UNA serie: temporada por temporada, qué episodios tienes
+    (con el archivo que corresponde) y cuáles faltan. Solo lee la base de
+    datos y la caché de TMDB, sin llamadas de red (rápido en el NAS)."""
+    tmdb_id = _int(tmdb_id)
+    if not tmdb_id:
+        return None
+    detail = _get_json(f"series:{tmdb_id}") or {}
+    catalog_rows = db.list_catalog_files(missing=False)
+    done_items = db.list_items(status="done", media_type="series")
+
+    files = {}       # (temporada, episodio) -> nombre de archivo
+    unnumbered = []  # archivos de la serie sin nº de episodio detectado
+    title = detail.get("title") or ""
+    poster = detail.get("poster_url")
+    year = detail.get("year")
+
+    def _episode_key(season, episode):
+        try:
+            return (int(season), int(episode))
+        except (TypeError, ValueError):
+            return None
+
+    for row in catalog_rows:
+        if row["media_type"] != "series" or _int(row["tmdb_id"]) != tmdb_id:
+            continue
+        title = title or (row["title"] or "")
+        poster = poster or row["poster_url"]
+        year = year or row["year"]
+        # Archivos dobles (S01E16 S01E17): un archivo cubre DOS episodios
+        pairs = _episode_numbers(row["filename"])
+        key = _episode_key(row["season"], row["episode"])
+        if key:
+            pairs.add(key)
+        if pairs:
+            for pair in sorted(pairs):
+                files.setdefault(pair, row["filename"])
+        else:
+            unnumbered.append(row["filename"])
+    for it in done_items:
+        if _int(it["tmdb_id"]) != tmdb_id:
+            continue
+        title = title or (it["chosen_title"] or it["detected_title"] or "")
+        poster = poster or it["poster_url"]
+        pairs = _episode_numbers(it["filename"])
+        key = _episode_key(it["season"], it["episode"])
+        if key:
+            pairs.add(key)
+        for pair in sorted(pairs):
+            files.setdefault(pair, it["filename"])
+
+    if not files and not unnumbered and not detail:
+        return None
+
+    # Series organizadas por AÑO ('S1973E11'): convierte el año de la carpeta
+    # al nº de temporada real de TMDB según el año de emisión.
+    year_to_num = {}
+    for s in detail.get("seasons") or []:
+        y = (s.get("air_date") or "")[:4]
+        if y.isdigit():
+            year_to_num.setdefault(int(y), s["season_number"])
+    if year_to_num:
+        files = {(year_to_num.get(se, se) if se >= 1900 else se, ep): fn
+                 for (se, ep), fn in files.items()}
+
+    seasons = []
+    known_seasons = set()
+    for s in detail.get("seasons") or []:
+        num = s["season_number"]
+        known_seasons.add(num)
+        total = s.get("episode_count") or 0
+        episodes = []
+        for ep in range(1, total + 1):
+            filename = files.get((num, ep))
+            episodes.append({"number": ep, "owned": filename is not None, "filename": filename})
+        # Episodios que tienes por encima de lo que TMDB lista (extras/errores)
+        for (season, ep), filename in sorted(files.items()):
+            if season == num and ep > total:
+                episodes.append({"number": ep, "owned": True, "filename": filename, "extra": True})
+        owned = sum(1 for e in episodes if e["owned"])
+        seasons.append({
+            "season_number": num,
+            "name": s.get("name") or f"Temporada {num}",
+            "total_count": total,
+            "owned_count": owned,
+            "missing_count": max(0, total - sum(1 for e in episodes if e["owned"] and not e.get("extra"))),
+            "episodes": episodes,
+        })
+    # Temporadas que tienes pero que TMDB no lista (p.ej. especiales T0)
+    extra_seasons = sorted({season for (season, _e) in files if season not in known_seasons})
+    for num in extra_seasons:
+        episodes = [{"number": ep, "owned": True, "filename": filename}
+                    for (season, ep), filename in sorted(files.items()) if season == num]
+        seasons.append({
+            "season_number": num,
+            "name": "Especiales" if num == 0 else f"Temporada {num}",
+            "total_count": 0,
+            "owned_count": len(episodes),
+            "missing_count": 0,
+            "episodes": episodes,
+        })
+    seasons.sort(key=lambda s: s["season_number"])
+
+    owned_total = len(files)
+    expected_total = sum(s["total_count"] for s in seasons)
+    return {
+        "tmdb_id": tmdb_id,
+        "title": title or f"Serie {tmdb_id}",
+        "year": year,
+        "poster_url": poster,
+        "overview": detail.get("overview") or "",
+        "seasons": seasons,
+        "owned_total": owned_total,
+        "expected_total": expected_total,
+        "missing_total": max(0, sum(s["missing_count"] for s in seasons)),
+        "unnumbered": sorted(unnumbered)[:30],
+        "unnumbered_total": len(unnumbered),
+        "has_detail": bool(detail),
+    }
 
 
 def update_series_details(limit=40, progress=None):

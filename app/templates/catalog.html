@@ -236,8 +236,8 @@
               <div class="album-saga-info">
                 <div class="album-saga-top">
                   <div>
-                    <h3>{{ show.title }}{% if show.year %} ({{ show.year }}){% endif %}</h3>
-                    <p>{{ show.owned_total }} de {{ show.expected_total }} episodios</p>
+                    <h3><a href="/catalog/series?tmdb_id={{ show.tmdb_id }}" style="color:inherit;">{{ show.title }}{% if show.year %} ({{ show.year }}){% endif %}</a></h3>
+                    <p>{{ show.owned_total }} de {{ show.expected_total }} episodios · <a href="/catalog/series?tmdb_id={{ show.tmdb_id }}">Ver capítulos</a></p>
                   </div>
                   {% if show.missing_total %}
                     <span class="album-chip warn">Faltan {{ show.missing_total }}</span>
@@ -394,6 +394,9 @@
                   {% if movie.episode_count %}{{ movie.episode_count }} episodio(s){% elif movie.year %}{{ movie.year }}{% endif %}
                   {% if movie.langs %} · {{ movie.langs }}{% endif %}
                 </small>
+                {% if movie.media_type == "series" and movie.tmdb_id %}
+                  <a class="fix-link" href="/catalog/series?tmdb_id={{ movie.tmdb_id }}">📺 Ver capítulos</a>
+                {% endif %}
                 {% if movie.path %}
                   <a class="fix-link" href="/catalog/fix?path={{ movie.path|urlencode }}&media_type={{ movie.media_type }}">✏️ Corregir</a>
                 {% endif %}

@@ -850,6 +850,21 @@ def catalog_page(request: Request):
     })
 
 
+@app.get("/catalog/series", response_class=HTMLResponse)
+def catalog_series_page(request: Request, tmdb_id: int = 0):
+    """Detalle de una serie: qué capítulos tienes y cuáles faltan, por temporada."""
+    show = catalog.series_episode_detail(tmdb_id)
+    return templates.TemplateResponse(request, "catalog_series.html", {
+        "request": request,
+        "tabs": TABS,
+        "active": "catalog",
+        "page": "catalog",
+        "tab_counts": db.pending_counts(),
+        **_base_context(),
+        "show": show,
+    })
+
+
 @app.get("/catalog/fix", response_class=HTMLResponse)
 def catalog_fix_page(request: Request, path: str = "", media_type: str = "movie", q: str = ""):
     media_type = media_type if media_type in ("movie", "series") else "movie"

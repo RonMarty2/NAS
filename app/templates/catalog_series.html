@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="album-page">
+    {% if not show %}
+      <section class="album-empty">
+        <h2>Serie no encontrada</h2>
+        <p>No hay datos de esa serie en el catálogo. Vuelve al catálogo y entra desde la tarjeta de la serie.</p>
+        <p><a class="btn btn-secondary" href="/catalog">← Volver al catálogo</a></p>
+      </section>
+    {% else %}
+      <section class="album-hero">
+        <div class="album-title">
+          <span class="album-kicker">Serie</span>
+          <h1>{{ show.title }}{% if show.year %} ({{ show.year }}){% endif %}</h1>
+          <p>
+            Tienes {{ show.owned_total }} episodio(s){% if show.expected_total %} de {{ show.expected_total }}{% endif %}.
+            {% if show.missing_total %}Te faltan {{ show.missing_total }}.{% elif show.expected_total %}¡Completa!{% endif %}
+          </p>
+        </div>
+      </section>
+
+      {% if not show.has_detail %}
+        <div class="target-warning">
+          <strong>Faltan datos de TMDB</strong>
+          <span>Aún no se descargó la lista de temporadas de esta serie. Pulsa "Actualizar datos" en el catálogo y vuelve a entrar.</span>
+        </div>
+      {% endif %}
+
+      <div class="fix-current" style="margin-bottom:16px;">
+        <div class="album-movie-poster fix-current-poster">
+          {% if show.poster_url %}<img src="{{ show.poster_url }}" alt="">{% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
+        </div>
+        {% if show.overview %}<div><small>{{ show.overview }}</small></div>{% endif %}
+      </div>
+
+      {% for season in show.seasons %}
+        <section class="album-section">
+          <div class="album-section-head">
+            <h2>{{ season.name }}</h2>
+            <span>
+              {{ season.owned_count }}{% if season.total_count %} de {{ season.total_count }}{% endif %} episodio(s)
+              {% if season.missing_count %} · faltan {{ season.missing_count }}{% elif season.total_count %} · completa{% endif %}
+            </span>
+          </div>
+          <div class="episode-grid">
+            {% for ep in season.episodes %}
+              <div class="episode-cell {{ 'owned' if ep.owned else 'missing' }}"
+                   title="{% if ep.owned %}{{ ep.filename }}{% else %}Te falta el episodio {{ ep.number }}{% endif %}">
+                {{ ep.number }}{% if ep.extra %}*{% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        </section>
+      {% endfor %}
+
+      {% if show.unnumbered_total %}
+        <section class="album-section">
+          <div class="album-section-head">
+            <h2>Sin número de episodio</h2>
+            <span>{{ show.unnumbered_total }} archivo(s) de esta serie sin T/E detectado (no cuentan en las casillas)</span>
+          </div>
+          <ul class="missing-text">
+            {% for f in show.unnumbered %}<li><small>{{ f }}</small></li>{% endfor %}
+            {% if show.unnumbered_total > show.unnumbered|length %}<li><small>… y {{ show.unnumbered_total - show.unnumbered|length }} más</small></li>{% endif %}
+          </ul>
+        </section>
+      {% endif %}
+
+      <p><a class="btn btn-secondary" href="/catalog">← Volver al catálogo</a></p>
+    {% endif %}
+  </div>
+
+  <style>
+    .episode-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+    .episode-cell {
+      min-width: 34px; padding: 6px 4px; text-align: center; border-radius: 8px;
+      font-size: 0.85rem; font-weight: 600;
+      background: rgba(120, 220, 150, 0.18); color: #7fdc96; border: 1px solid rgba(120, 220, 150, 0.35);
+    }
+    .episode-cell.missing {
+      background: rgba(240, 110, 110, 0.12); color: #f08c8c; border: 1px dashed rgba(240, 110, 110, 0.4);
+    }
+  </style>
+{% endblock %}
