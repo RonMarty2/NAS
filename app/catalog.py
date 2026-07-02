@@ -283,6 +283,73 @@ def _build_catalog_uncached():
     }
 
 
+def build_missing():
+    """Lista de compras: TODO lo que falta en un solo lugar.
+
+    - Películas de sagas incompletas (separando las que aún no se estrenan,
+      que no se pueden conseguir todavía).
+    - Episodios que faltan por serie, temporada por temporada.
+    Reusa build_catalog() (con su caché), así que no cuesta trabajo extra."""
+    cat = build_catalog()
+    today = time.strftime("%Y-%m-%d")
+
+    movies = []
+    upcoming = []
+    for c in cat.get("collections") or []:
+        for part in c.get("parts") or []:
+            if part.get("owned"):
+                continue
+            entry = {
+                "title": part.get("title") or "",
+                "year": part.get("year"),
+                "release_date": part.get("release_date") or "",
+                "poster_url": part.get("poster_url"),
+                "collection": c.get("name") or "",
+            }
+            date = entry["release_date"]
+            if date and date > today:
+                upcoming.append(entry)
+            else:
+                movies.append(entry)
+    movies.sort(key=lambda m: (m["collection"].lower(), m["release_date"] or "9999"))
+    upcoming.sort(key=lambda m: m["release_date"] or "9999")
+
+    shows = []
+    total_episodes = 0
+    for show in cat.get("series_progress") or []:
+        if not show.get("missing_total"):
+            continue
+        seasons = []
+        for season in show.get("seasons") or []:
+            if not season.get("missing_episodes"):
+                continue
+            seasons.append({
+                "name": season.get("name") or f"Temporada {season.get('season_number')}",
+                "missing_episodes": season["missing_episodes"],
+                "whole_season": season.get("owned_count") == 0,
+                "total_count": season.get("total_count") or 0,
+            })
+        total_episodes += show["missing_total"]
+        shows.append({
+            "tmdb_id": show.get("tmdb_id"),
+            "title": show.get("title") or "",
+            "year": show.get("year"),
+            "poster_url": show.get("poster_url"),
+            "missing_total": show["missing_total"],
+            "seasons": seasons,
+        })
+    shows.sort(key=lambda s: (s["title"] or "").lower())
+
+    return {
+        "movies": movies,
+        "upcoming": upcoming,
+        "shows": shows,
+        "total_movies": len(movies),
+        "total_upcoming": len(upcoming),
+        "total_episodes": total_episodes,
+    }
+
+
 # Secciones de "Descubre": género, década, estudio y populares/taquilleras.
 # Cada una es una consulta a /discover de TMDB, cacheada mucho tiempo (cambian poco).
 DISCOVER_SECTIONS = [

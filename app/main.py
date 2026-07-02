@@ -850,6 +850,20 @@ def catalog_page(request: Request):
     })
 
 
+@app.get("/faltantes", response_class=HTMLResponse)
+def missing_page(request: Request):
+    """Lista de compras: todas las películas y episodios que faltan, juntos."""
+    return templates.TemplateResponse(request, "missing.html", {
+        "request": request,
+        "tabs": TABS,
+        "active": "missing",
+        "page": "catalog",
+        "tab_counts": db.pending_counts(),
+        **_base_context(),
+        "missing": catalog.build_missing(),
+    })
+
+
 @app.get("/catalog/series", response_class=HTMLResponse)
 def catalog_series_page(request: Request, tmdb_id: int = 0):
     """Detalle de una serie: qué capítulos tienes y cuáles faltan, por temporada."""

@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block content %}
+  <div class="album-page">
+    <section class="album-hero">
+      <div class="album-title">
+        <span class="album-kicker">Lista de compras</span>
+        <h1>Lo que te falta</h1>
+        <p>
+          {{ missing.total_movies }} película(s) de tus sagas y {{ missing.total_episodes }} episodio(s) de tus series.
+          {% if missing.total_upcoming %}Además hay {{ missing.total_upcoming }} que aún no se estrenan.{% endif %}
+        </p>
+      </div>
+    </section>
+
+    {% if not missing.total_movies and not missing.total_episodes and not missing.total_upcoming %}
+      <section class="album-empty">
+        <h2>¡No te falta nada!</h2>
+        <p>Todas tus sagas y series están completas. Usa <a href="/wishlist">Deseos</a> para apuntar cosas nuevas que quieras conseguir.</p>
+      </section>
+    {% endif %}
+
+    {% if missing.shows %}
+      <section class="album-section">
+        <div class="album-section-head">
+          <h2>Episodios de series</h2>
+          <span>{{ missing.total_episodes }} episodio(s) en {{ missing.shows|length }} serie(s)</span>
+        </div>
+        <div class="missing-show-list">
+          {% for show in missing.shows %}
+            <article class="missing-show" data-album-card>
+              <div class="missing-show-poster">
+                {% if show.poster_url %}<img src="{{ show.poster_url }}" alt="" loading="lazy">{% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
+              </div>
+              <div class="missing-show-info">
+                <h3><a href="/catalog/series?tmdb_id={{ show.tmdb_id }}" style="color:inherit;">{{ show.title }}{% if show.year %} ({{ show.year }}){% endif %}</a></h3>
+                <p><span class="album-chip warn">Faltan {{ show.missing_total }}</span></p>
+                {% for season in show.seasons %}
+                  <small class="missing-text">
+                    <strong>{{ season.name }}:</strong>
+                    {% if season.whole_season %}
+                      completa ({{ season.total_count }} episodios)
+                    {% else %}
+                      episodios {{ season.missing_episodes[:20]|join(", ") }}{% if season.missing_episodes|length > 20 %} … y {{ season.missing_episodes|length - 20 }} más{% endif %}
+                    {% endif %}
+                  </small>
+                {% endfor %}
+              </div>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    {% if missing.movies %}
+      <section class="album-section">
+        <div class="album-section-head">
+          <h2>Películas de sagas</h2>
+          <span>{{ missing.total_movies }} pendiente(s), ya estrenadas</span>
+        </div>
+        <div class="album-movie-grid">
+          {% for m in missing.movies %}
+            <article class="album-movie" data-album-card>
+              <div class="album-movie-poster">
+                {% if m.poster_url %}<img src="{{ m.poster_url }}" alt="" loading="lazy">{% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
+              </div>
+              <strong>{{ m.title }}</strong>
+              <small>{{ m.year or "" }} · {{ m.collection }}</small>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
+    {% if missing.upcoming %}
+      <section class="album-section">
+        <div class="album-section-head">
+          <h2>Aún no se estrenan</h2>
+          <span>{{ missing.total_upcoming }} — no se pueden conseguir todavía</span>
+        </div>
+        <div class="album-movie-grid">
+          {% for m in missing.upcoming %}
+            <article class="album-movie" data-album-card>
+              <div class="album-movie-poster">
+                {% if m.poster_url %}<img src="{{ m.poster_url }}" alt="" loading="lazy">{% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
+              </div>
+              <strong>{{ m.title }}</strong>
+              <small>Estreno: {{ m.release_date or "sin fecha" }} · {{ m.collection }}</small>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+  </div>
+
+  <style>
+    .missing-show-list { display: flex; flex-direction: column; gap: 12px; }
+    .missing-show { display: flex; gap: 14px; padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.03); }
+    .missing-show-poster { width: 72px; flex: 0 0 72px; }
+    .missing-show-poster img { width: 100%; border-radius: 8px; display: block; }
+    .missing-show-info h3 { margin: 0 0 4px; }
+    .missing-show-info p { margin: 0 0 6px; }
+    .missing-show-info small { display: block; margin-bottom: 2px; }
+  </style>
+{% endblock %}
