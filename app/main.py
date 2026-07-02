@@ -970,6 +970,15 @@ def _start_catalog_import(folder, limit):
                 })
 
             result = catalog.import_folder(folder, enrich_limit=limit, progress=push)
+            # Reconocimiento automático al terminar el escaneo: antes había que
+            # pulsar "Actualizar datos" aparte, y parecía que escanear "no
+            # reconocía nada".
+            push({"done": 0, "total": 0, "current": "", "message": "Reconociendo lo importado..."})
+            catalog.backfill_series_episode_numbers()
+            auto = catalog.enrich_unmatched(limit=None, progress=push)
+            auto += catalog.enrich_unmatched_series(limit=None, progress=push)
+            if auto:
+                result["message"] = result.get("message", "") + f" Reconocidos automáticamente: {auto}."
             catalog.invalidate_build()
             catalog.set_status({
                 "running": False,

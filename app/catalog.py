@@ -353,14 +353,26 @@ def unmatched_files():
     ]
 
 
+def _deaccent(text):
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", text or "")
+                   if unicodedata.category(c) != "Mn")
+
+
 def search_candidates(query, media_type="movie"):
     """Resultados de TMDB para que el usuario elija a mano cuál es el
-    correcto (corregir un archivo sin reconocer, o uno mal reconocido)."""
+    correcto. Si no hay resultados, reintenta sin acentos ('Escalofríos' ->
+    'Escalofrios'), que a veces desbloquea la búsqueda."""
     media_type = media_type if media_type in ("movie", "series") else "movie"
     query = (query or "").strip()
     if not query:
         return []
-    return tmdb.search(query, media_type)
+    results = tmdb.search(query, media_type)
+    if not results:
+        plain = _deaccent(query)
+        if plain and plain != query:
+            results = tmdb.search(plain, media_type)
+    return results
 
 
 def apply_manual_match(path, tmdb_id, media_type):
