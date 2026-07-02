@@ -89,17 +89,20 @@ def identify(path):
                 "season": None, "episode": None}
 
     info = guessit(filename)
+    fallback_episode = _spanish_episode_from_name(filename)
     gtype = info.get("type")  # 'movie' o 'episode'
 
-    if gtype == "episode" or info.get("season") is not None or info.get("episode") is not None:
+    if fallback_episode:
+        media_type = "series"
+    elif gtype == "episode" or info.get("season") is not None or info.get("episode") is not None:
         media_type = "series"
     elif gtype == "movie":
         media_type = "movie"
     else:
         media_type = "unknown"
 
-    season = info.get("season")
-    episode = info.get("episode")
+    season = fallback_episode["season"] if fallback_episode else info.get("season")
+    episode = fallback_episode["episode"] if fallback_episode else info.get("episode")
     # guessit a veces devuelve listas para episodios dobles
     if isinstance(season, list):
         season = season[0] if season else None
@@ -109,12 +112,34 @@ def identify(path):
     quality, langs = tech_info(filename)
     return {
         "media_type": media_type,
-        "title": info.get("title"),
+        "title": fallback_episode["title"] if fallback_episode else info.get("title"),
         "year": info.get("year"),
         "season": season,
         "episode": episode,
         "quality": quality,
         "langs": langs,
+    }
+
+
+def _spanish_episode_from_name(filename):
+    """Detecta patrones comunes en espaÃ±ol que guessit no entiende:
+    `Aida T10xC35.ts`, `Aida T10C35.ts`, `Aida T10x35.ts`.
+    """
+    stem = os.path.splitext(filename)[0]
+    match = re.search(
+        r"^(?P<title>.+?)[ ._\-]*T(?P<season>\d{1,2})[ ._\-]*(?:xC?|C)(?P<episode>\d{1,3})(?:\b|[ ._\-])",
+        stem,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    title = re.sub(r"[._]+", " ", match.group("title")).strip(" -_.")
+    if not title:
+        return None
+    return {
+        "title": title,
+        "season": int(match.group("season")),
+        "episode": int(match.group("episode")),
     }
 
 

@@ -492,13 +492,63 @@ def remove_wishlist_item(item_id):
 # ---------------- Items (cola y historial) ----------------
 
 def add_item(original_path, filename, size_bytes=0):
-    """Inserta un archivo nuevo si no existe. Devuelve el id o None si ya existía."""
+    """Inserta un archivo nuevo o reactiva uno viejo que volvio a aparecer.
+
+    Si el usuario descarga otra vez el mismo nombre/ruta, SQLite ve el
+    original_path repetido. Antes se ignoraba para siempre aunque el archivo
+    estuviera realmente en descargas; por eso algunos videos no reaparecian.
+    """
     with _lock, get_conn() as conn:
         cur = conn.execute(
             "INSERT OR IGNORE INTO items(original_path, filename, size_bytes) VALUES(?,?,?)",
             (original_path, filename, size_bytes),
         )
-        return cur.lastrowid if cur.rowcount else None
+        if cur.rowcount:
+            return cur.lastrowid
+
+        row = conn.execute(
+            "SELECT id, status FROM items WHERE original_path=?",
+            (original_path,),
+        ).fetchone()
+        if not row or row["status"] not in ("done", "error"):
+            return None
+
+        conn.execute(
+            """
+            UPDATE items SET
+                filename=?,
+                size_bytes=?,
+                media_type='unknown',
+                status='pending',
+                detected_title=NULL,
+                detected_year=NULL,
+                season=NULL,
+                episode=NULL,
+                tmdb_id=NULL,
+                chosen_title=NULL,
+                chosen_year=NULL,
+                poster_url=NULL,
+                overview=NULL,
+                artist=NULL,
+                album=NULL,
+                track_no=NULL,
+                media_info=NULL,
+                file_hash=NULL,
+                file_hash_size=NULL,
+                dest_folder=NULL,
+                dest_path=NULL,
+                error=NULL,
+                created_at=datetime('now'),
+                processed_at=NULL,
+                quality=NULL,
+                langs=NULL,
+                match_attempts=0,
+                cover_attempts=0
+            WHERE id=?
+            """,
+            (filename, size_bytes, row["id"]),
+        )
+        return row["id"]
 
 
 def get_item(item_id):

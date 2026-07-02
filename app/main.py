@@ -410,6 +410,7 @@ def _activity(scan_notice=None, local_metadata_notice=None, catalog_notice=None)
 @app.get("/api/status")
 def api_status():
     """Estado ligero para el sondeo del front (no renderiza HTML pesado)."""
+    _maybe_reconcile_pending_moves()
     return _activity()
 
 
@@ -1292,6 +1293,34 @@ def _destination_exists(item, dest_folder, _folder_cache=None):
     return targets.inspect(item, dest_folder, _folder_cache=_folder_cache)["exact_exists"]
 
 
+def _source_exists(item):
+    try:
+        return bool(item and item["original_path"] and os.path.exists(item["original_path"]))
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _mark_done_if_already_moved(item, dest_folder, target):
+    """Cierra una ficha pendiente si el origen ya no esta y el destino esta completo."""
+    if not item or not target.get("exact_exists"):
+        return False
+    if _source_exists(item):
+        return False
+    if not target.get("safe_to_delete_pending"):
+        return False
+    db.update_item(
+        item["id"],
+        dest_folder=dest_folder,
+        status="done",
+        dest_path=target["dest_path"],
+        processed_at=_now(),
+        error=None,
+    )
+    catalog.invalidate_build()
+    _schedule_jellyfin_refresh()
+    return True
+
+
 def _target_detail(item):
     base = item["dest_folder"] or organizer.default_base(item["media_type"])
     return targets.inspect(item, base)
@@ -1501,7 +1530,10 @@ def confirm(item_id: int, dest_folder: str = Form(""), new_subfolder: str = Form
         db.update_item(item_id, status="error",
                        error="La carpeta destino está fuera de las rutas permitidas.")
         return _redirect_to_type(item["media_type"])
-    if _destination_exists(item, target):
+    target_detail = targets.inspect(item, target)
+    if target_detail["exact_exists"]:
+        if _mark_done_if_already_moved(item, target, target_detail):
+            return _redirect_to_type(item["media_type"])
         db.update_item(item_id, dest_folder=target, status="pending", error=None)
         return RedirectResponse(f"/item/{item_id}/conflict", status_code=303)
 
@@ -1523,7 +1555,10 @@ def confirm_series(ids: List[int] = Form(...), dest_folder: str = Form(""),
         item = db.get_item(item_id)
         if not item or item["status"] != "pending":
             continue
-        if _destination_exists(item, target, _folder_cache=_folder_cache):
+        target_detail = targets.inspect(item, target, _folder_cache=_folder_cache)
+        if target_detail["exact_exists"]:
+            if _mark_done_if_already_moved(item, target, target_detail):
+                continue
             db.update_item(item_id, dest_folder=target, status="pending", error=CONFLICT_NOTICE)
             continue
         db.update_item(item_id, dest_folder=target, status="processing", error=None)
