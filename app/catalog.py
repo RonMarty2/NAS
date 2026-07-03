@@ -1020,6 +1020,9 @@ def enrich_unmatched(limit=None, progress=None):
 
 _SE_RE = re.compile(r"[Ss](\d{1,4})[\s._-]*[Ee](\d{1,3})")
 _X_RE = re.compile(r"\b(\d{1,2})x(\d{1,3})\b")
+# 'T10xC35' (Temporada 10, Capítulo 35 pegados): muy común en grabaciones
+# hechas con capturadoras/IPTV en español.
+_TXC_RE = re.compile(r"\b[Tt](\d{1,4})[xX][Cc](\d{1,4})\b")
 # Formatos comunes en español y otros que antes quedaban 'sin número':
 _CAP_RE = re.compile(r"\b[Cc]ap(?:[ií]tulo)?[\s._-]*(\d{1,4})\b")
 _EP_WORD_RE = re.compile(r"\b[Ee]p(?:isodio|isode)?[\s._-]*(\d{1,4})\b")
@@ -1043,7 +1046,7 @@ def _parse_season_episode(filename, path=None):
     """Saca (temporada, episodio) del nombre: 'S10E03', '5x11', 'Capítulo 12',
     'Episodio 5', 'Temporada 2/05 - título.mkv'... Regex primero (rápido);
     guessit con guardián solo como respaldo."""
-    m = _SE_RE.search(filename or "") or _X_RE.search(filename or "")
+    m = _SE_RE.search(filename or "") or _X_RE.search(filename or "") or _TXC_RE.search(filename or "")
     if m:
         return int(m.group(1)), int(m.group(2))
     folder = _folder_season(path)
@@ -1098,6 +1101,9 @@ def _episode_numbers(filename):
             pos = m2.end()
     if not pairs:
         for m in _X_RE.finditer(name):
+            pairs.add((int(m.group(1)), int(m.group(2))))
+    if not pairs:
+        for m in _TXC_RE.finditer(name):
             pairs.add((int(m.group(1)), int(m.group(2))))
     return pairs
 
