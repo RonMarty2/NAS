@@ -145,11 +145,37 @@ def backfill_tech():
         db.update_item(it["id"], quality=quality, langs=langs)
 
 
+def reidentify_unknown_pending():
+    """Reintenta identificar los pendientes que quedaron 'unknown' (el nombre
+    no se pudo leer en su momento). El escaneo solo identifica una vez al
+    llegar el archivo: si luego mejora el detector (nuevo patrón de nombre),
+    ese archivo se quedaba 'unknown' para siempre aunque el detector ya lo
+    supiera leer, porque nada lo volvía a intentar. Barato: sin red."""
+    fixed = 0
+    for it in db.list_items(status="pending"):
+        if it["media_type"] != "unknown":
+            continue
+        path = it["original_path"]
+        if not path or not os.path.exists(path):
+            continue
+        ident = identify.identify_safe(path)
+        if ident["media_type"] == "unknown":
+            continue
+        db.update_item(
+            it["id"], media_type=ident["media_type"], detected_title=ident.get("title"),
+            detected_year=ident.get("year"), season=ident.get("season"), episode=ident.get("episode"),
+            quality=ident.get("quality"), langs=ident.get("langs"),
+        )
+        fixed += 1
+    return fixed
+
+
 def refresh_pending_metadata():
     """Una sola pasada sobre los pendientes que completa lo que falte: info de
     archivo (peso/calidad/idioma), reintento de TMDB para pelis/series sin
     coincidencia, y portada para música. Antes eran tres pasadas separadas (tres
     consultas de toda la cola) cada 30s; ahora se recorre una vez."""
+    reidentify_unknown_pending()
     tmdb_ok = tmdb.configured()
     for it in db.list_items(status="pending"):
         mt = it["media_type"]
