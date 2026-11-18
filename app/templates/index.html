@@ -12,6 +12,51 @@
     </div>
   {% endif %}
 
+  {% if duplicate_groups %}
+    <div class="dup-compare" style="margin-bottom: 1rem;">
+      <h4>⚖️ Descargas repetidas en esta bandeja ({{ duplicate_groups|length }}) — elige cuál conservar antes de mover</h4>
+      {% for dg in duplicate_groups %}
+        <div class="dup-group">
+          <div class="dup-group-head">
+            <strong>{{ dg.target_name }}</strong>
+            <span>{{ dg.count }} archivos en descargas{% if dg.same_size %} · mismo peso{% endif %}</span>
+          </div>
+          <div class="dup-candidates">
+            {% for cand in dg.entries %}
+              {% set meta = file_meta[cand.id] %}
+              {% set dup = duplicate_map[cand.id] %}
+              <div class="dup-candidate">
+                <div class="dup-candidate-name" title="{{ cand.original_path }}">{{ cand.filename }}</div>
+                {% set extra_class = "file-facts-compact" %}
+                {% include "file_facts.html" %}
+                {% if cand.error %}<p class="error">{{ cand.error }}</p>{% endif %}
+                <div class="ep-actions" style="margin-top:.4rem; flex-wrap:wrap;">
+                  {% if not meta.raw or not meta.raw.get("duration_seconds") %}
+                    <form method="post" action="/item/{{ cand.id }}/probe">
+                      <button class="btn btn-secondary btn-sm" type="submit">🔍 Analizar (ffprobe)</button>
+                    </form>
+                  {% endif %}
+                  {% if cand.status != 'processing' and dup.same_size_count > 1 %}
+                    <form method="post" action="/item/{{ cand.id }}/delete-duplicate"
+                          onsubmit="return confirmAndMarkDelete(this, 'Se calculará SHA-256 completo antes de borrar. Si no es idéntico, no se borrará. ¿Continuar?');">
+                      <button class="btn btn-danger btn-sm" type="submit" {% if delete_dup_notice.running %}disabled{% endif %}>Borrar si es idéntico</button>
+                    </form>
+                  {% endif %}
+                  {% if cand.status != 'processing' %}
+                    <form method="post" action="/item/{{ cand.id }}/delete"
+                          onsubmit="return confirm('¿Borrar este archivo descargado del disco?');">
+                      <button class="btn btn-danger btn-sm" type="submit">🗑️ Descartar este</button>
+                    </form>
+                  {% endif %}
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
   {% if not items %}
     <p class="empty">No hay nada por revisar aquí. Cuando JDownloader termine una descarga,
     aparecerá automáticamente. También puedes pulsar <strong>🔄 Buscar ahora</strong>.</p>

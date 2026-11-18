@@ -87,13 +87,22 @@
                 </div>
               {% endif %}
             </div>
-            <form method="post" action="/series/confirm-all" onsubmit="return confirmAndMarkSubmit(this, 'Se moverán los {{ g.count }} episodio(s) de una vez. ¿Continuar?', 'Moviendo...');">
-              {% for ep in g.episodes %}<input type="hidden" name="ids" value="{{ ep['id'] }}">{% endfor %}
-              <input type="hidden" name="dest_folder" id="dest-{{ g.gid }}" value="{{ g.default_base }}">
-              <button class="btn btn-primary" type="submit">
-                {% if g.target.exact_count %}Mover sin conflictos{% else %}✅ Confirmar y mover los {{ g.count }}{% endif %}
-              </button>
-            </form>
+            <div class="actions" style="margin-top:.5rem;">
+              <form method="post" action="/series/confirm-all" onsubmit="return confirmAndMarkSubmit(this, 'Se moverán los {{ g.count }} episodio(s) de una vez. ¿Continuar?', 'Moviendo...');">
+                {% for ep in g.episodes %}<input type="hidden" name="ids" value="{{ ep['id'] }}">{% endfor %}
+                <input type="hidden" name="dest_folder" id="dest-{{ g.gid }}" value="{{ g.default_base }}">
+                <button class="btn btn-primary" type="submit">
+                  {% if g.target.exact_count %}Mover solo los nuevos (sin conflicto){% else %}✅ Confirmar y mover los {{ g.count }}{% endif %}
+                </button>
+              </form>
+              {% if g.target.exact_count %}
+                <form method="post" action="/series/replace-all" onsubmit="return confirmAndMarkSubmit(this, 'Se moverán TODOS los {{ g.count }} episodio(s) y se REEMPLAZARÁN los que ya existían en la biblioteca por estos nuevos. ¿Continuar?', 'Reemplazando...');">
+                  {% for ep in g.episodes %}<input type="hidden" name="ids" value="{{ ep['id'] }}">{% endfor %}
+                  <input type="hidden" name="dest_folder" value="{{ g.default_base }}">
+                  <button class="btn btn-secondary" type="submit">🔄 Reemplazar existentes con estos nuevos</button>
+                </form>
+              {% endif %}
+            </div>
           </div>
 
           {# ---- Lista expandible de episodios (verificación) ---- #}

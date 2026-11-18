@@ -759,8 +759,10 @@ def tab(request: Request, media_type: str, dedup: int = 0):
         **_base_context(),
         "leaves": leaves, "defaults": defaults,
         "file_meta": _file_meta_map(items), "duplicate_map": duplicates.analyze(items),
+        "duplicate_groups": duplicates.comparison_groups(items),
         "target_map": _target_map(items, defaults),
         "has_processing": bool(processing),
+        "dedup_notice": dedup_notice,
         "dedup_running": bool(dedup_notice.get("running")),
         "delete_dup_notice": delete_dup_notice,
         "delete_dup_running": bool(delete_dup_notice.get("running")),
@@ -904,6 +906,15 @@ def catalog_fix_page(request: Request, path: str = "", media_type: str = "movie"
 @app.post("/catalog/fix/apply")
 def catalog_fix_apply(path: str = Form(...), tmdb_id: int = Form(...), media_type: str = Form("movie")):
     ok, message = catalog.apply_manual_match(path, tmdb_id, media_type)
+    catalog.set_status({"running": False, "message": message})
+    return RedirectResponse("/catalog", status_code=303)
+
+
+@app.post("/catalog/set-lang")
+def catalog_set_lang(path: str = Form(...), lang_tag: str = Form("")):
+    """Permite marcar el idioma real o estado ('Latino', 'Castellano', 'Dual',
+    'Inglés', 'Por mejorar') de una película en el Catálogo."""
+    ok, message = catalog.set_catalog_language(path, lang_tag)
     catalog.set_status({"running": False, "message": message})
     return RedirectResponse("/catalog", status_code=303)
 
@@ -1692,6 +1703,24 @@ def confirm_series(ids: List[int] = Form(...), dest_folder: str = Form(""),
             continue
         db.update_item(item_id, dest_folder=target, status="processing", error=None)
         _queue_move(item_id)
+    return _redirect_to_type("series")
+
+
+@app.post("/series/replace-all")
+def replace_series(ids: List[int] = Form(...), dest_folder: str = Form(""),
+                   new_subfolder: str = Form("")):
+    """Mueve todos los episodios de la serie reemplazando los que ya existían
+    en la biblioteca (útil al descargar una temporada en mejor calidad)."""
+    base = dest_folder.strip() or organizer.default_base("series")
+    target = folders.ensure_folder(base, new_subfolder)
+    if target is None:
+        return _redirect_to_type("series")
+    for item_id in ids:
+        item = db.get_item(item_id)
+        if not item or item["status"] != "pending":
+            continue
+        db.update_item(item_id, dest_folder=target, status="processing", error=None)
+        _queue_move(item_id, on_existing="replace")
     return _redirect_to_type("series")
 
 

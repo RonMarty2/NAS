@@ -475,13 +475,48 @@ def build_missing():
         })
     shows.sort(key=lambda s: (s["title"] or "").lower())
 
+    # Películas que YA tienes pero conviene reemplazar/mejorar: están en
+    # Castellano (sin Latino), marcadas 'Por mejorar', o en baja resolución (<=720p).
+    upgrades = []
+    seen_upg = set()
+    for row in db.list_catalog_files(missing=False):
+        if row["media_type"] != "movie":
+            continue
+        langs_txt = (row["langs"] or "").lower()
+        qual_txt = (row["quality"] or "").lower()
+        reasons = []
+        if "por mejorar" in langs_txt:
+            reasons.append("🔄 Marcada por mejorar")
+        if "castellano" in langs_txt and "latino" not in langs_txt and "dual" not in langs_txt:
+            reasons.append("🇪🇸 Audio en Castellano (España)")
+        if re.search(r"\b(720p|576p|480p|360p|dvdrip|cam|ts)\b", qual_txt):
+            reasons.append(f"📉 Calidad mejorable ({row['quality']})")
+        if not reasons:
+            continue
+        key = row["tmdb_id"] or row["path"]
+        if key in seen_upg:
+            continue
+        seen_upg.add(key)
+        upgrades.append({
+            "title": row["title"] or row["filename"],
+            "year": row["year"],
+            "poster_url": row["poster_url"],
+            "quality": row["quality"] or "",
+            "langs": row["langs"] or "",
+            "reasons": " · ".join(reasons),
+            "path": row["path"],
+        })
+    upgrades.sort(key=lambda u: (u["title"] or "").lower())
+
     return {
         "movies": movies,
         "upcoming": upcoming,
         "shows": shows,
+        "upgrades": upgrades,
         "total_movies": len(movies),
         "total_upcoming": len(upcoming),
         "total_episodes": total_episodes,
+        "total_upgrades": len(upgrades),
     }
 
 
@@ -769,6 +804,26 @@ def _enrich_copy_meta(row_dict):
     }
 
 
+def set_catalog_language(path, lang_tag):
+    """Permite marcar manualmente en el inventario el idioma o estado de un
+    archivo ('Latino', 'Castellano', 'Dual', 'Inglés', 'Por mejorar'), por si
+    el MKV solo traía la etiqueta genérica 'spa' tras haber sido renombrado."""
+    row = db.get_catalog_file_by_path(path)
+    if not row:
+        return False, "Ese archivo no está en el catálogo."
+    lang_tag = (lang_tag or "").strip()
+    info = filemeta.from_json(row["media_info"] if "media_info" in row.keys() else "")
+    if lang_tag:
+        info["audio_languages"] = [x.strip() for x in lang_tag.split("·") if x.strip()]
+    db.update_catalog_file(
+        path,
+        langs=lang_tag,
+        media_info=filemeta.to_json(info) if info else (row["media_info"] if "media_info" in row.keys() else None),
+    )
+    invalidate_build()
+    return True, f"Idioma/estado actualizado a «{lang_tag or 'Sin especificar'}» para {row['title'] or row['filename']}."
+
+
 def probe_catalog_files(limit=80, progress=None):
     """Analiza con ffprobe los archivos del Catálogo para descubrir su calidad
     real (1080p/720p/4K), idioma de audio interno (Latino / Castellano / Inglés),
@@ -777,6 +832,11 @@ def probe_catalog_files(limit=80, progress=None):
         r for r in db.list_catalog_files(missing=False)
         if r["path"] and os.path.isfile(r["path"])
     ]
+    # Cruzamos con el historial de items movidos para recuperar el nombre original
+    # de descarga (antes de renombrar a 'Título (Año).mkv') si traía 'Castellano' o 'Latino'.
+    moved_by_dest = {
+        it["dest_path"]: it for it in db.list_items(status="done") if it["dest_path"]
+    }
     pending = []
     for r in rows:
         info = filemeta.from_json(r["media_info"] if "media_info" in r.keys() else "")
@@ -789,14 +849,17 @@ def probe_catalog_files(limit=80, progress=None):
     done = 0
     for r in pending:
         done += 1
-        info = filemeta.inspect_file(r["path"], filename=r["filename"], size_bytes=r["size_bytes"], allow_probe=True)
-        prev_langs = [x.strip() for x in str(r["langs"] or "").split("·") if x.strip()]
+        moved = moved_by_dest.get(r["path"])
+        orig_name = (moved["filename"] if moved and moved["filename"] else r["filename"])
+        info = filemeta.inspect_file(r["path"], filename=orig_name, size_bytes=r["size_bytes"], allow_probe=True)
+        prev_raw = r["langs"] or (moved["langs"] if moved else "") or ""
+        prev_langs = [x.strip() for x in str(prev_raw).split("·") if x.strip()]
         merged_langs = filemeta._merge_audio_languages(prev_langs, info.get("audio_languages") or [])
         if merged_langs:
             info["audio_languages"] = merged_langs
         q_parts = [x for x in (info.get("resolution") or info.get("quality"), info.get("source"), info.get("video_codec")) if x]
-        q_label = " · ".join(q_parts) or (r["quality"] or "")
-        l_label = " · ".join(info.get("audio_languages") or []) or (r["langs"] or "")
+        q_label = " · ".join(q_parts) or (r["quality"] or (moved["quality"] if moved else "") or "")
+        l_label = " · ".join(info.get("audio_languages") or []) or prev_raw
         db.update_catalog_file(
             r["path"],
             media_info=filemeta.to_json(info),

@@ -6,16 +6,43 @@
         <span class="album-kicker">Lista de compras</span>
         <h1>Lo que te falta</h1>
         <p>
-          {{ missing.total_movies }} película(s) de tus sagas y {{ missing.total_episodes }} episodio(s) de tus series.
+          {{ missing.total_movies }} película(s) de tus sagas, {{ missing.total_episodes }} episodio(s) de tus series{% if missing.total_upgrades %} y {{ missing.total_upgrades }} película(s) para mejorar/reemplazar{% endif %}.
           {% if missing.total_upcoming %}Además hay {{ missing.total_upcoming }} que aún no se estrenan.{% endif %}
         </p>
       </div>
     </section>
 
-    {% if not missing.total_movies and not missing.total_episodes and not missing.total_upcoming %}
+    {% if not missing.total_movies and not missing.total_episodes and not missing.total_upcoming and not missing.total_upgrades %}
       <section class="album-empty">
         <h2>¡No te falta nada!</h2>
         <p>Todas tus sagas y series están completas. Usa <a href="/wishlist">Deseos</a> para apuntar cosas nuevas que quieras conseguir.</p>
+      </section>
+    {% endif %}
+
+    {% if missing.upgrades %}
+      <section class="album-section">
+        <div class="album-section-head">
+          <h2>🔄 Para reemplazar o mejorar (idioma o calidad)</h2>
+          <span>{{ missing.total_upgrades }} película(s) en Castellano (España), baja resolución (≤720p) o marcadas por mejorar</span>
+        </div>
+        <div class="album-movie-grid">
+          {% for u in missing.upgrades %}
+            <article class="album-movie" data-album-card>
+              <div class="album-movie-poster">
+                {% if u.poster_url %}
+                  <img src="{{ u.poster_url }}" alt="" loading="lazy" class="poster-zoom" data-title="{{ u.title }}{% if u.year %} ({{ u.year }}){% endif %}">
+                {% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
+              </div>
+              <strong>{{ u.title }}</strong>
+              <small>{{ u.year or "" }}{% if u.quality %} · {{ u.quality }}{% endif %}{% if u.langs %} · {{ u.langs }}{% endif %}</small>
+              <small style="color: var(--warn); font-weight: 600;">{{ u.reasons }}</small>
+              <button type="button" class="btn btn-secondary copy-btn" data-copy="{{ u.title }}{% if u.year %} {{ u.year }}{% endif %} 1080p Latino">📋 Copiar para buscar</button>
+              {% if u.path %}
+                <a class="fix-link" href="/catalog/fix?path={{ u.path|urlencode }}&media_type=movie">✏️ Cambiar etiqueta</a>
+              {% endif %}
+            </article>
+          {% endfor %}
+        </div>
       </section>
     {% endif %}
 

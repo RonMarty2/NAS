@@ -22,7 +22,25 @@
             <strong>{{ row.title or row.filename }}</strong>
             <small>{{ row.filename }}</small>
             <small>{{ row.path }}</small>
-            <small>{% if row.tmdb_id %}Reconocido actualmente como TMDB #{{ row.tmdb_id }}{% else %}Sin reconocer todavía{% endif %}</small>
+            <small>{% if row.tmdb_id %}Reconocido actualmente como TMDB #{{ row.tmdb_id }}{% else %}Sin reconocer todavía{% endif %}{% if row.quality %} · Calidad: {{ row.quality }}{% endif %}{% if row.langs %} · Idioma: {{ row.langs }}{% endif %}</small>
+            <div style="margin-top: .65rem;">
+              <small style="display:block; margin-bottom:.35rem; color:var(--muted);">🏷️ Marcar idioma o estado en tu inventario (útil si el archivo ya fue renombrado y quieres anotar que está en Castellano o que quieres bajarlo en mejor calidad):</small>
+              <div class="ep-tech" style="gap:.4rem;">
+                {% for label, val in [
+                  ("🇲🇽 Español Latino", "Latino"),
+                  ("🇪🇸 Castellano (España)", "Castellano"),
+                  ("🌎 Dual (Latino + Inglés)", "Latino · Inglés"),
+                  ("🇺🇸 Inglés / VOSE", "Inglés"),
+                  ("🔄 Por mejorar (reemplazar)", (row.langs ~ " · Por mejorar") if row.langs and "Por mejorar" not in row.langs else "Por mejorar")
+                ] %}
+                  <form method="post" action="/catalog/set-lang" style="margin:0;">
+                    <input type="hidden" name="path" value="{{ row.path }}">
+                    <input type="hidden" name="lang_tag" value="{{ val }}">
+                    <button type="submit" class="btn btn-secondary btn-sm">{{ label }}</button>
+                  </form>
+                {% endfor %}
+              </div>
+            </div>
           </div>
         </div>
       </section>
