@@ -74,6 +74,11 @@
     <div class="actions">
       {% if item["media_type"] in ("movie", "series") %}
         <a class="btn btn-secondary" href="/item/{{ item['id'] }}/search?q={{ (item['chosen_title'] or item['detected_title'] or '')|urlencode }}">✏️ Editar / buscar</a>
+        {% if not meta.raw or not meta.raw.get("duration_seconds") %}
+          <form method="post" action="/item/{{ item['id'] }}/probe" onsubmit="return markSubmitting(this, 'Analizando...');">
+            <button class="btn btn-secondary" type="submit" title="Leer resolución, pistas de audio (Latino/Castellano), subtítulos y duración reales con ffprobe">🔍 Ver calidad/idioma real</button>
+          </form>
+        {% endif %}
       {% else %}
         <a class="btn btn-secondary" href="/item/{{ item['id'] }}/edit-music">✏️ Editar etiquetas</a>
       {% endif %}
@@ -91,13 +96,11 @@
         <button class="btn btn-ghost" type="submit">⏭️ Omitir</button>
       </form>
       {% if target.exact_exists %}
-      <a class="btn btn-secondary" href="/item/{{ item['id'] }}/conflict">Comparar versiones</a>
-        {% if target.safe_to_delete_pending %}
-          <form method="post" action="/item/{{ item['id'] }}/delete"
-                onsubmit="return confirm('Se borrara SOLO la copia pendiente de descargas. La pelicula que ya esta en la biblioteca no se toca. Continuar?');">
-            <button class="btn btn-danger" type="submit">Borrar copia pendiente</button>
-          </form>
-        {% endif %}
+      <a class="btn btn-secondary" href="/item/{{ item['id'] }}/conflict">⚖️ Comparar versiones</a>
+      <form method="post" action="/item/{{ item['id'] }}/delete"
+            onsubmit="return confirm('Se borrará SOLO la copia pendiente de descargas. La película que ya está en tu biblioteca no se toca. ¿Continuar?');">
+        <button class="btn btn-danger" type="submit">🗑️ Borrar pendiente</button>
+      </form>
       {% else %}
       <form method="post" action="/item/{{ item['id'] }}/delete"
             onsubmit="return confirm('¿Borrar el archivo del disco? Esta acción no se puede deshacer.');">

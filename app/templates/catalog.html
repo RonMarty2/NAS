@@ -34,6 +34,11 @@
           <button class="btn btn-secondary" type="submit" {% if catalog_running %}disabled{% endif %}>Actualizar datos</button>
         </form>
 
+        <form method="post" action="/catalog/probe" class="album-form album-form-small" title="Lee con ffprobe la resolución real (1080p/720p/4K), el idioma de las pistas de audio internas (Latino / Castellano / Inglés), subtítulos y duración.">
+          <input type="hidden" name="limit" value="120">
+          <button class="btn btn-secondary" type="submit" {% if catalog_running %}disabled{% endif %}>🔍 Analizar calidad e idiomas</button>
+        </form>
+
         <form method="post" action="/catalog/retry-unmatched" class="album-form album-form-small" title="Si algo nunca se reconoció (agotó sus intentos), esto le da una oportunidad más. Después pulsa 'Actualizar datos'.">
           <button class="btn btn-secondary" type="submit" {% if catalog_running %}disabled{% endif %}>🔁 Reintentar lo que falló</button>
         </form>
@@ -58,13 +63,19 @@
     </section>
 
     <section class="album-search">
-      <label for="albumSearch">Buscar en mi álbum</label>
+      <label for="albumSearch">Buscar o filtrar en tu inventario</label>
       <div class="album-search-row">
-        <input id="albumSearch" type="search" placeholder="Película, serie o saga" autocomplete="off">
+        <input id="albumSearch" type="search" placeholder="Película, serie, saga, idioma (castellano, latino) o calidad (720p, 1080p)" autocomplete="off">
         <a id="albumSearchClear" class="btn btn-secondary" href="/catalog">Limpiar</a>
         <form method="post" action="/catalog/refresh" title="Si borraste o moviste archivos fuera de la app (File Station), esto los quita de la vista sin repetir el escaneo completo">
           <button class="btn btn-secondary" type="submit">🔄 Actualizar vista</button>
         </form>
+      </div>
+      <div class="ep-tech" style="margin-top:.55rem; gap:.45rem;">
+        <button type="button" class="btn btn-secondary btn-sm inv-filter active" data-inv-filter="all" onclick="setCatalogFilter('all', this)">Todas</button>
+        <button type="button" class="btn btn-secondary btn-sm inv-filter" data-inv-filter="castellano" onclick="setCatalogFilter('castellano', this)" title="Películas con audio en Castellano (España)">🇪🇸 En Castellano</button>
+        <button type="button" class="btn btn-secondary btn-sm inv-filter" data-inv-filter="no-latino" onclick="setCatalogFilter('no-latino', this)" title="Películas con idioma detectado que NO incluyen Latino">🌎 Sin audio Latino</button>
+        <button type="button" class="btn btn-secondary btn-sm inv-filter" data-inv-filter="low-res" onclick="setCatalogFilter('low-res', this)" title="Películas en 720p, 576p o 480p que podrías mejorar a 1080p/4K">📉 Calidad ≤720p (mejorable)</button>
       </div>
       <small id="albumSearchSummary"></small>
     </section>
@@ -104,27 +115,50 @@
     {% if library_dups %}
       <section class="album-section" data-album-section>
         <div class="album-section-head">
-          <h2>Duplicados</h2>
-          <span>{{ library_dups|length }} película(s) repetida(s)</span>
+          <h2>⚖️ Duplicados en tu biblioteca</h2>
+          <span>{{ library_dups|length }} película(s) con más de una copia · comparadas con ffprobe (calidad, idioma, escenas extra y salud)</span>
         </div>
         <div class="dup-list">
           {% for dup in library_dups %}
-            <article class="dup-card" data-album-card>
+            <article class="dup-card" data-album-card data-search="{{ dup.title }} {{ dup.year or '' }}">
               <div class="dup-poster">
                 {% if dup.poster_url %}<img src="{{ dup.poster_url }}" alt="" loading="lazy">{% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
               </div>
               <div class="dup-body">
                 <h3>{{ dup.title }}{% if dup.year %} ({{ dup.year }}){% endif %} <span class="album-chip warn">{{ dup.count }} copias</span></h3>
                 {% for copy in dup.copies %}
-                  <div class="dup-copy">
+                  <div class="dup-copy" style="{% if copy.recommended %}border-left: 3px solid var(--ok); padding-left: .6rem;{% endif %}">
                     <div class="dup-copy-info">
-                      <strong>{{ copy.filename }}</strong>
+                      <div>
+                        <strong>{{ copy.filename }}</strong>
+                        {% if copy.recommended %}
+                          <span class="album-chip ok">🏆 Recomendada (definitiva)</span>
+                        {% endif %}
+                        {% if copy.readable is sameas false %}
+                          <span class="album-chip warn">⚠️ Dañado / Ilegible</span>
+                        {% endif %}
+                      </div>
                       <small>{{ copy.folder }}</small>
-                      <small>{{ copy.size_h }}{% if copy.quality %} · {{ copy.quality }}{% endif %}{% if copy.langs %} · {{ copy.langs }}{% endif %}</small>
+                      <small>
+                        <strong>Peso:</strong> {{ copy.size_h }}
+                        {% if copy.quality %} · <strong>Calidad:</strong> {{ copy.quality }}{% endif %}
+                        {% if copy.video_codec %} ({{ copy.video_codec }}{% if copy.bitrate_h %} · {{ copy.bitrate_h }}{% endif %}){% endif %}
+                        {% if copy.duration_h %} · <strong>Duración:</strong> ⏱️ {{ copy.duration_h }}{% endif %}
+                      </small>
+                      <small>
+                        {% if copy.langs %}<strong>Audio:</strong> {{ copy.langs }}{% else %}<strong>Audio:</strong> Sin especificar{% endif %}
+                        {% if copy.subs %} · <strong>Subs:</strong> {{ copy.subs }}{% endif %}
+                      </small>
+                      {% if copy.audio_tracks %}
+                        <small style="opacity:.85;">Pistas: {{ copy.audio_tracks }}</small>
+                      {% endif %}
+                      {% for note in copy.notes %}
+                        <small style="color: var(--warn); font-weight: 600;">{{ note }}</small>
+                      {% endfor %}
                     </div>
-                    <form method="post" action="/catalog/delete-file" onsubmit="return confirm('¿Borrar este archivo del disco?\n\n{{ copy.path }}\n\nEsta acción no se puede deshacer.');">
+                    <form method="post" action="/catalog/delete-file" onsubmit="return confirm('¿Borrar esta copia del disco?\n\n{{ copy.path }}\n\nEsta acción no se puede deshacer.');">
                       <input type="hidden" name="path" value="{{ copy.path }}">
-                      <button type="submit" class="btn btn-danger">🗑️ Borrar este</button>
+                      <button type="submit" class="btn btn-danger">🗑️ Borrar esta</button>
                     </form>
                   </div>
                 {% endfor %}
@@ -145,7 +179,7 @@
         <div class="album-saga-grid">
           {% for saga in catalog.collections %}
             <article class="album-saga" data-album-card
-                     data-search="{{ saga.name }} {% for part in saga.parts %} {{ part.title }} {{ part.year or '' }} {{ part.release_date or '' }}{% endfor %}">
+                     data-search="{{ saga.name }} {% for part in saga.parts %} {{ part.title }} {{ part.year or '' }} {{ part.release_date or '' }} {{ part.langs or '' }} {{ part.quality or '' }}{% endfor %}">
               <div class="album-saga-cover">
                 {% if saga.poster_url %}
                   <img src="{{ saga.poster_url }}" alt="">
@@ -178,7 +212,7 @@
                         <strong>{{ loop.index }}. {{ part.title }}</strong>
                         <small>{% if part.release_date %}{{ part.release_date }}{% elif part.year %}{{ part.year }}{% else %}Sin fecha{% endif %}</small>
                         {% if part.owned %}
-                          <span>La tienes{% if part.langs %} · {{ part.langs }}{% endif %}{% if part.quality %} · {{ part.quality }}{% endif %}</span>
+                          <span>La tienes{% if part.langs %} · {{ part.langs }}{% endif %}{% if part.quality %} · {{ part.quality }}{% endif %}{% if part.duration_h %} · ⏱️ {{ part.duration_h }}{% endif %}{% if part.size_h %} · {{ part.size_h }}{% endif %}</span>
                         {% else %}
                           <span class="missing-text">Falta</span>
                         {% endif %}
@@ -202,7 +236,8 @@
         <div class="album-movie-grid">
           {% for movie in catalog.standalone %}
             <article class="album-movie" data-album-card
-                     data-search="{{ movie.title }} {{ movie.year or '' }}">
+                     data-langs="{{ movie.langs or '' }}" data-quality="{{ movie.quality or '' }}"
+                     data-search="{{ movie.title }} {{ movie.year or '' }} {{ movie.langs or '' }} {{ movie.quality or '' }}">
               <div class="album-movie-poster">
                 {% if movie.poster_url %}
                   <img src="{{ movie.poster_url }}" alt="">
@@ -211,7 +246,13 @@
                 {% endif %}
               </div>
               <strong>{{ movie.title }}</strong>
-              <small>{{ movie.year or "" }}</small>
+              <small>
+                {{ movie.year or "" }}
+                {% if movie.quality %} · {{ movie.quality }}{% endif %}
+                {% if movie.langs %} · {{ movie.langs }}{% endif %}
+                {% if movie.duration_h %} · {{ movie.duration_h }}{% endif %}
+                {% if movie.size_h %} · {{ movie.size_h }}{% endif %}
+              </small>
             </article>
           {% endfor %}
         </div>
@@ -390,7 +431,8 @@
           <div class="album-movie-grid">
             {% for movie in folder['items'] %}
               <article class="album-movie" data-album-card
-                       data-search="{{ movie.title }} {{ movie.year or '' }} {{ folder.name }} {{ folder.root }}">
+                       data-langs="{{ movie.langs or '' }}" data-quality="{{ movie.quality or '' }}"
+                       data-search="{{ movie.title }} {{ movie.year or '' }} {{ folder.name }} {{ folder.root }} {{ movie.langs or '' }} {{ movie.quality or '' }}">
                 <div class="album-movie-poster">
                   {% if movie.poster_url %}
                     <img src="{{ movie.poster_url }}" alt="" loading="lazy">
@@ -401,7 +443,10 @@
                 <strong>{{ movie.title }}</strong>
                 <small>
                   {% if movie.episode_count %}{{ movie.episode_count }} episodio(s){% elif movie.year %}{{ movie.year }}{% endif %}
+                  {% if movie.quality %} · {{ movie.quality }}{% endif %}
                   {% if movie.langs %} · {{ movie.langs }}{% endif %}
+                  {% if movie.duration_h %} · {{ movie.duration_h }}{% endif %}
+                  {% if movie.size_h %} · {{ movie.size_h }}{% endif %}
                 </small>
                 {% if movie.media_type == "series" and movie.tmdb_id %}
                   <a class="fix-link" href="/catalog/series?tmdb_id={{ movie.tmdb_id }}">📺 Ver capítulos</a>
@@ -424,11 +469,24 @@
 
     <section id="albumSearchEmpty" class="album-empty album-empty-search" hidden>
       <h2>No aparece en tu álbum</h2>
-      <p>Prueba con otro nombre o revisa si falta importar esa carpeta.</p>
+      <p>Prueba con otro nombre, pulsa <strong>🔍 Analizar calidad e idiomas</strong> arriba si aún no se han leído las pistas de audio, o revisa si falta importar esa carpeta.</p>
     </section>
   </div>
 
   <script>
+    var currentInvFilter = "all";
+    var applyAlbumSearchGlobal = null;
+
+    function setCatalogFilter(mode, btn) {
+      currentInvFilter = mode || "all";
+      document.querySelectorAll(".inv-filter").forEach(function (b) {
+        b.classList.toggle("active", b === btn);
+        b.classList.toggle("btn-primary", b === btn);
+        b.classList.toggle("btn-secondary", b !== btn);
+      });
+      if (applyAlbumSearchGlobal) applyAlbumSearchGlobal(false);
+    }
+
     (function () {
       var input = document.getElementById("albumSearch");
       if (!input) return;
@@ -447,19 +505,38 @@
 
       cards.forEach(function (card, index) {
         card.dataset.searchText = normalize((card.getAttribute("data-search") || "") + " " + card.textContent);
+        card.dataset.langsNorm = normalize(card.getAttribute("data-langs") || "");
+        card.dataset.qualNorm = normalize(card.getAttribute("data-quality") || "");
         card.style.setProperty("--album-order", Math.min(index, 18));
       });
+
+      function matchesInvFilter(card) {
+        if (currentInvFilter === "all") return true;
+        var st = card.dataset.searchText || "";
+        var lg = card.dataset.langsNorm || "";
+        var ql = card.dataset.qualNorm || "";
+        if (currentInvFilter === "castellano") {
+          return lg.indexOf("castellano") !== -1 || st.indexOf("castellano") !== -1;
+        }
+        if (currentInvFilter === "no-latino") {
+          return Boolean(lg) && lg.indexOf("latino") === -1 && lg.indexOf("dual") === -1 && lg.indexOf("multi") === -1;
+        }
+        if (currentInvFilter === "low-res") {
+          return /(720p|576p|480p|360p|dvdrip|cam|ts\b)/.test(ql || st);
+        }
+        return true;
+      }
 
       function applySearch(push) {
         var raw = input.value.trim();
         var q = normalize(raw);
         var visible = 0;
         cards.forEach(function (card) {
-          var match = !q || card.dataset.searchText.indexOf(q) !== -1;
+          var match = (!q || card.dataset.searchText.indexOf(q) !== -1) && matchesInvFilter(card);
           card.hidden = !match;
           if (match) {
             visible += 1;
-            if (q) {
+            if (q || currentInvFilter !== "all") {
               card.classList.remove("album-pop");
               void card.offsetWidth;
               card.classList.add("album-pop");
@@ -472,9 +549,10 @@
           var hasVisible = section.querySelector("[data-album-card]:not([hidden])");
           section.hidden = !hasVisible;
         });
-        if (empty) empty.hidden = !q || visible > 0;
+        var activeQuery = Boolean(q || currentInvFilter !== "all");
+        if (empty) empty.hidden = !activeQuery || visible > 0;
         if (summary) {
-          summary.textContent = q ? (visible + " resultado(s)") : "";
+          summary.textContent = activeQuery ? (visible + " resultado(s)") : "";
         }
         if (clear) clear.hidden = !q;
         if (push) {
@@ -483,6 +561,7 @@
         }
       }
 
+      applyAlbumSearchGlobal = applySearch;
       input.value = params.get("q") || "";
       input.addEventListener("input", function () { applySearch(true); });
       applySearch(false);

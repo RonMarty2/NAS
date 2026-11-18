@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
-  <h1>Comparar versiones</h1>
+  <h1>⚖️ Comparar versiones</h1>
 
   <div class="conflict-head">
     <div class="poster">
       {% if item["poster_url"] %}
-        <img src="{{ item['poster_url'] }}" alt="poster">
+        <img src="{{ item['poster_url'] }}" alt="póster">
       {% else %}
         <div class="poster-placeholder">Sin imagen</div>
       {% endif %}
@@ -13,64 +13,102 @@
     <div>
       <h2>{{ item["chosen_title"] or item["detected_title"] or item["filename"] }}
         {% if item["chosen_year"] %}({{ item["chosen_year"] }}){% endif %}</h2>
-      <p class="meta">Ya existe un archivo final con el mismo nombre. Elige que version conservar.</p>
-      <p class="preview">Destino exacto: <span>{{ target.dest_path }}</span></p>
+      <p class="meta">Ya tienes esta obra en tu biblioteca. Aquí se analizan ambos archivos con <strong>ffprobe</strong> (resolución real, pistas de audio Latino/Castellano, subtítulos, duración para detectar escenas extra y estado de salud) para que elijas cuál es el definitivo.</p>
+      <p class="preview">Archivo actual en biblioteca: <span>{{ target.dest_path }}</span></p>
+      {% if target.final_dest_path and target.final_dest_path != target.dest_path %}
+        <p class="preview">Si reemplazas, quedará guardado en: <span>{{ target.final_dest_path }}</span> (y se borrará el archivo anterior)</p>
+      {% endif %}
     </div>
   </div>
 
+  {% if comparison %}
+    <div class="scan-banner {{ 'done' if comparison.winner == 'new' else ('warn' if comparison.warnings else 'running') }}" style="margin-bottom: 1rem;">
+      <strong style="font-size: 1rem;">{{ comparison.headline }}</strong>
+      {% for w in comparison.warnings %}
+        <span style="color: var(--warn); font-weight: 600; margin-top: .25rem;">{{ w }}</span>
+      {% endfor %}
+      {% for r in comparison.reasons %}
+        <span style="margin-top: .15rem;">• {{ r }}</span>
+      {% endfor %}
+    </div>
+  {% endif %}
+
   <div class="compare-grid">
     <section class="version-panel version-existing">
-      <h3>Existente en biblioteca</h3>
+      <h3>📁 Existente en biblioteca {% if comparison and comparison.winner == 'existing' %}<span class="badge" style="background:var(--ok);">Recomendado</span>{% endif %}</h3>
       <div class="version-name" title="{{ existing.path }}">{{ existing.filename }}</div>
       {% if existing.facts %}
         <div class="file-facts">
           {% for fact in existing.facts %}<span>{{ fact }}</span>{% endfor %}
         </div>
       {% else %}
-        <p class="empty">No se pudieron leer datos tecnicos.</p>
+        <p class="empty">No se pudieron leer datos técnicos.</p>
+      {% endif %}
+      {% if existing.raw and existing.raw.audio_tracks %}
+        <p class="meta"><strong>Pistas de audio:</strong> {{ existing.raw.audio_tracks|join(" · ") }}</p>
       {% endif %}
       {% if existing.modified %}<p class="meta">Modificado: {{ existing.modified }}</p>{% endif %}
       <p class="path">{{ existing.path }}</p>
     </section>
 
     <section class="version-panel version-new">
-      <h3>Nuevo pendiente</h3>
+      <h3>📥 Nuevo en descargas {% if comparison and comparison.winner == 'new' %}<span class="badge" style="background:var(--ok);">Recomendado</span>{% endif %}</h3>
       <div class="version-name" title="{{ pending.path }}">{{ pending.filename }}</div>
       {% if pending.facts %}
         <div class="file-facts">
           {% for fact in pending.facts %}<span>{{ fact }}</span>{% endfor %}
         </div>
       {% else %}
-        <p class="empty">No se pudieron leer datos tecnicos.</p>
+        <p class="empty">No se pudieron leer datos técnicos.</p>
+      {% endif %}
+      {% if pending.raw and pending.raw.audio_tracks %}
+        <p class="meta"><strong>Pistas de audio:</strong> {{ pending.raw.audio_tracks|join(" · ") }}</p>
       {% endif %}
       {% if pending.modified %}<p class="meta">Modificado: {{ pending.modified }}</p>{% endif %}
       <p class="path">{{ pending.path }}</p>
     </section>
   </div>
 
-  {% if not target.safe_to_delete_pending %}
-    <div class="target-warning target-warning-strong conflict-warning">
-      <strong>No borres el pendiente todavia</strong>
-      <span>No se pudo confirmar que el destino sea igual al archivo nuevo. Pendiente: {{ target.source_size_bytes|filesizeformat }}. Destino: {{ target.dest_size_bytes|filesizeformat }}. Para evitar perder una copia buena, solo puedes reemplazar con el nuevo o mantener ambos.</span>
-    </div>
+  {% if comparison and comparison.rows %}
+    <section class="album-section" style="margin-top: 1rem;">
+      <h3 style="margin: 0 0 .5rem; font-size: 1rem;">Detalle técnico cara a cara</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Característica</th>
+            <th>📁 Existente en biblioteca</th>
+            <th>📥 Nuevo pendiente</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in comparison.rows %}
+            <tr>
+              <td><strong>{{ row.label }}</strong>{% if row.note %}<br><small style="color:var(--warn);">{{ row.note }}</small>{% endif %}</td>
+              <td>{{ row.existing }}</td>
+              <td>{{ row.new }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
   {% endif %}
 
   <div class="decision-panel">
-    <form method="post" action="/item/{{ item['id'] }}/conflict/keep-existing"
-          onsubmit="return confirmAndMarkDelete(this, 'Se borrara el archivo nuevo de descargas y se conservara el que ya esta en la biblioteca. Continuar?');">
-      <button class="btn btn-danger" type="submit" {% if not target.safe_to_delete_pending %}disabled title="Bloqueado: el destino pesa distinto"{% endif %}>Mantener existente y borrar pendiente</button>
+    <form method="post" action="/item/{{ item['id'] }}/conflict/replace"
+          onsubmit="return confirmAndMarkSubmit(this, 'Se borrará el archivo antiguo de la biblioteca y se dejará el NUEVO como definitivo. ¿Continuar?', 'Reemplazando...');">
+      <button class="btn btn-primary" type="submit">🔄 Reemplazar con el nuevo (borrar el anterior)</button>
     </form>
 
-    <form method="post" action="/item/{{ item['id'] }}/conflict/replace"
-          onsubmit="return confirmAndMarkSubmit(this, 'Se reemplazara el archivo existente por el nuevo. Continuar?', 'Reemplazando...');">
-      <button class="btn btn-primary" type="submit">Reemplazar con el nuevo</button>
+    <form method="post" action="/item/{{ item['id'] }}/conflict/keep-existing"
+          onsubmit="return confirmAndMarkDelete(this, 'Se conservará el archivo que ya está en tu biblioteca y se borrará el nuevo de descargas. ¿Continuar?');">
+      <button class="btn btn-danger" type="submit" {% if target.dest_size_bytes <= 0 %}disabled title="El archivo en destino pesa 0 bytes"{% endif %}>🗑️ Mantener existente y borrar el descargado</button>
     </form>
 
     <form method="post" action="/item/{{ item['id'] }}/conflict/keep-both"
-          onsubmit="return confirmAndMarkSubmit(this, 'Se conservaran ambas versiones. El nuevo se guardara con un nombre unico tipo (2). Continuar?', 'Moviendo...');">
-      <button class="btn btn-secondary" type="submit">Mantener ambos</button>
+          onsubmit="return confirmAndMarkSubmit(this, 'Se conservarán ambas versiones. El nuevo se guardará con un nombre único tipo (2). ¿Continuar?', 'Moviendo...');">
+      <button class="btn btn-secondary" type="submit">📁 Mantener ambos (ej. versión extendida + normal)</button>
     </form>
 
-    <a class="btn btn-ghost" href="/tab/{{ item['media_type'] }}">Cancelar</a>
+    <a class="btn btn-ghost" href="/tab/{{ item['media_type'] }}">← Volver</a>
   </div>
 {% endblock %}

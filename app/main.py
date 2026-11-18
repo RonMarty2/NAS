@@ -959,6 +959,61 @@ def catalog_update(limit: int = Form(80)):
     return RedirectResponse("/catalog", status_code=303)
 
 
+@app.post("/catalog/probe")
+def catalog_probe(limit: int = Form(100)):
+    """Analiza con ffprobe los archivos del Catálogo para leer resolución,
+    idiomas reales (Latino vs Castellano), subtítulos y duración."""
+    if not CATALOG_LOCK.acquire(blocking=False):
+        catalog.set_status({
+            "running": False,
+            "message": "Ya hay una tarea del catálogo en curso.",
+        })
+        return RedirectResponse("/catalog", status_code=303)
+    limit = max(1, min(int(limit or 100), 500))
+    catalog.set_status({
+        "running": True,
+        "message": "Analizando calidad, idiomas (Latino/Castellano) y duración reales...",
+        "done": 0,
+        "total": 0,
+        "current": "",
+    })
+
+    def worker():
+        try:
+            def push(update):
+                catalog.set_status({
+                    "running": True,
+                    "message": update.get("message") or "Analizando calidad e idiomas...",
+                    "done": update.get("done", 0),
+                    "total": update.get("total", 0),
+                    "current": update.get("current", ""),
+                })
+
+            res = catalog.probe_catalog_files(limit=limit, progress=push)
+            catalog.invalidate_build()
+            catalog.set_status({
+                "running": False,
+                "message": (
+                    f"Análisis técnico terminado: {res['probed']} archivo(s) inspeccionados con ffprobe."
+                    if res["probed"] else
+                    "Todos los archivos del catálogo ya tienen sus datos de calidad e idioma al día."
+                ),
+                "done": res["probed"],
+                "total": res["total"],
+                "current": "",
+            })
+        except Exception as exc:
+            catalog.set_status({
+                "running": False,
+                "message": f"No se pudo completar el análisis técnico: {exc}",
+            })
+        finally:
+            CATALOG_LOCK.release()
+
+    threading.Thread(target=worker, daemon=True).start()
+    return RedirectResponse("/catalog", status_code=303)
+
+
 @app.post("/catalog/delete-file")
 def catalog_delete_file(path: str = Form("")):
     """Borra un archivo concreto de la biblioteca (una copia duplicada).
@@ -1058,6 +1113,7 @@ def _start_catalog_update(limit):
             enriched = catalog.enrich_unmatched(limit=None, progress=push)  # completa todo
             enriched_series = catalog.enrich_unmatched_series(limit=None, progress=push)  # idem series
             result = catalog.update_catalog(limit=limit, progress=push)
+            probed = catalog.probe_catalog_files(limit=limit, progress=push)
             catalog.update_discover(limit=len(catalog.DISCOVER_SECTIONS), progress=push)
             catalog.update_series_details(limit=max(40, limit), progress=push)
             catalog.prune_cache()  # limpia caché de cosas que ya no tienes
@@ -1066,6 +1122,8 @@ def _start_catalog_update(limit):
                 result["message"] = result.get("message", "") + f" Pósters completados: {enriched}."
             if enriched_series:
                 result["message"] = result.get("message", "") + f" Series reconocidas: {enriched_series}."
+            if probed.get("probed"):
+                result["message"] = result.get("message", "") + f" Calidad/idioma leídos: {probed['probed']}."
             catalog.set_status({
                 "running": False,
                 "message": result.get("message", "Catalogo actualizado."),
@@ -1409,11 +1467,39 @@ def _allow_probe():
     return str(config.get("probe_media_info")).strip().lower() in ("1", "true", "yes", "on")
 
 
-def _file_summary(path, filename=None, size_bytes=0, media_info=""):
+def _file_summary(path, filename=None, size_bytes=0, media_info="", force_probe=False):
     filename = filename or os.path.basename(path or "")
     info = filemeta.from_json(media_info)
-    if not info:
-        info = filemeta.inspect_file(path or "", filename=filename, size_bytes=size_bytes, allow_probe=_allow_probe())
+    # Si el archivo ya está en catalog_files (con idioma/calidad guardados antes
+    # de renombrar), recuperamos esos datos para no perder etiquetas como 'Castellano'.
+    if path and not info:
+        cat_row = db.get_catalog_file_by_path(path)
+        if cat_row:
+            info = filemeta.from_json(cat_row["media_info"]) if "media_info" in cat_row.keys() else {}
+            if cat_row["langs"] and not info.get("audio_languages"):
+                info["audio_languages"] = [x.strip() for x in str(cat_row["langs"]).split("·") if x.strip()]
+            if cat_row["quality"] and not info.get("quality"):
+                info["quality"] = str(cat_row["quality"]).split("·")[0].strip()
+
+    need_probe = force_probe and path and os.path.exists(path) and (
+        "duration_seconds" not in info or "readable" not in info
+    )
+    if not info or need_probe:
+        probed = filemeta.inspect_file(
+            path or "",
+            filename=filename,
+            size_bytes=size_bytes,
+            allow_probe=True if force_probe else _allow_probe(),
+        )
+        if info:
+            prev_langs = info.get("audio_languages") or []
+            probed_langs = probed.get("audio_languages") or []
+            merged = filemeta._merge_audio_languages(prev_langs, probed_langs)
+            info.update(probed)
+            if merged:
+                info["audio_languages"] = merged
+        else:
+            info = probed
     elif not info.get("size_bytes"):
         info["size_bytes"] = size_bytes or 0
 
@@ -1431,11 +1517,13 @@ def _file_summary(path, filename=None, size_bytes=0, media_info=""):
         except OSError:
             modified = ""
 
+    disp = filemeta.display_info(display_item)
     return {
         "path": path or "",
         "filename": filename,
         "exists": bool(path and os.path.exists(path)),
-        "facts": filemeta.display_info(display_item)["facts"],
+        "facts": disp["facts"],
+        "raw": disp["raw"],
         "modified": modified,
     }
 
@@ -1622,8 +1710,18 @@ def conflict_form(request: Request, item_id: int):
         filename=item["filename"],
         size_bytes=item["size_bytes"],
         media_info=item["media_info"],
+        force_probe=True,
     )
-    existing = _file_summary(target["dest_path"])
+    if pending.get("raw"):
+        langs_txt = " · ".join(pending["raw"].get("audio_languages") or [])
+        db.update_item(
+            item_id,
+            media_info=filemeta.to_json(pending["raw"]),
+            quality=pending["raw"].get("quality") or item["quality"],
+            langs=langs_txt or item["langs"],
+        )
+    existing = _file_summary(target["dest_path"], force_probe=True)
+    comparison = filemeta.compare_versions(pending.get("raw"), existing.get("raw"))
     return templates.TemplateResponse(request, "conflict.html", {
         "request": request,
         "tabs": TABS,
@@ -1636,7 +1734,34 @@ def conflict_form(request: Request, item_id: int):
         "target": target,
         "pending": pending,
         "existing": existing,
+        "comparison": comparison,
     })
+
+
+@app.post("/item/{item_id}/probe")
+def probe_item(item_id: int):
+    """Analiza bajo demanda con ffprobe un archivo pendiente (resolución,
+    pistas de audio reales Latino/Castellano, subtítulos, duración y salud)."""
+    item = db.get_item(item_id)
+    if not item:
+        return RedirectResponse("/", status_code=303)
+    summary = _file_summary(
+        item["original_path"],
+        filename=item["filename"],
+        size_bytes=item["size_bytes"],
+        media_info=item["media_info"],
+        force_probe=True,
+    )
+    raw = summary.get("raw") or {}
+    if raw:
+        langs_txt = " · ".join(raw.get("audio_languages") or [])
+        db.update_item(
+            item_id,
+            media_info=filemeta.to_json(raw),
+            quality=raw.get("quality") or item["quality"],
+            langs=langs_txt or item["langs"],
+        )
+    return _redirect_to_type(item["media_type"])
 
 
 @app.post("/item/{item_id}/conflict/keep-existing")
@@ -1645,12 +1770,12 @@ def conflict_keep_existing(item_id: int):
     mt = item["media_type"] if item else "movie"
     if item:
         target = _target_detail(item)
-        if target["exact_exists"]:
-            ok, message = _target_delete_safety(item, target)
-            if ok:
-                ok, message = _delete_item_file_and_record(item)
+        if target["exact_exists"] and target.get("dest_size_bytes", 0) > 0:
+            ok, message = _delete_item_file_and_record(item)
             if not ok:
                 db.update_item(item_id, error=message)
+        elif target["exact_exists"]:
+            db.update_item(item_id, error="El archivo existente en biblioteca pesa 0 bytes; no se borró el pendiente por seguridad.")
         else:
             db.update_item(item_id, error="Ya no existe un archivo en destino para comparar.")
     return _redirect_to_type(mt)
@@ -1728,11 +1853,12 @@ def delete(item_id: int):
     mt = item["media_type"] if item else "movie"
     if item:
         target = _target_detail(item)
-        if target["exact_exists"]:
-            ok, message = _target_delete_safety(item, target)
-            if not ok:
-                db.update_item(item_id, error=message)
-                return _redirect_to_type(mt)
+        if target["exact_exists"] and target.get("dest_size_bytes", 0) <= 0:
+            db.update_item(
+                item_id,
+                error="No se borró el pendiente porque el archivo del destino pesa 0 bytes. Revisa antes de borrar.",
+            )
+            return _redirect_to_type(mt)
         ok, message = _delete_item_file_and_record(item)
         if not ok:
             db.update_item(item_id, error=message)

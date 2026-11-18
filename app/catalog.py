@@ -5,7 +5,7 @@ import re
 import threading
 import time
 
-from . import config, db, identify
+from . import config, db, filemeta, identify
 from .metadata import tmdb
 
 
@@ -688,41 +688,215 @@ def refresh_existing():
     return {"checked": checked, "removed": removed}
 
 
-def library_duplicates(catalog_rows=None):
-    """Películas de la biblioteca que están DUPLICADAS de verdad: el MISMO título
-    (según el nombre del archivo) en dos o más rutas. Es estricto a propósito
-    porque hay un botón de borrar: no basta con que TMDB les diera el mismo id
-    (eso marcaba por error pelis distintas de una saga, p.ej. The Purge).
+_SEQUEL_RE = re.compile(r"\b(?:parte?|part|vol(?:umen)?|cap)?\s*([2-9]|10|ii|iii|iv|v|vi)\b", re.I)
 
-    `catalog_rows` (opcional) evita un recorrido extra de la tabla si el
-    llamador ya la tiene a mano (ver _build_catalog_uncached)."""
+
+def _sequel_token(filename):
+    """Extrae un posible número de entrega ('2', '3', 'ii'...) del nombre de
+    archivo para evitar agrupar por error dos entregas distintas de una saga
+    si TMDB les asignó el mismo tmdb_id."""
+    stem = os.path.splitext(filename or "")[0]
+    stem = re.sub(r"\(?\b(19|20)\d{2}\b\)?", " ", stem)
+    stem = _DUP_STRIP.sub(" ", stem)
+    m = _SEQUEL_RE.search(stem)
+    return (m.group(1) or "").lower() if m else ""
+
+
+def _enrich_copy_meta(row_dict):
+    """Obtiene los datos técnicos reales (resolución, idiomas Latino/Castellano,
+    pistas de audio, subtítulos, duración, salud) de una copia de biblioteca."""
+    path = row_dict.get("path") or ""
+    filename = row_dict.get("filename") or os.path.basename(path)
+    size_bytes = _int(row_dict.get("size_bytes"))
+    raw_json = row_dict.get("media_info") or ""
+    info = filemeta.from_json(raw_json)
+    need_probe = bool(
+        path and os.path.isfile(path)
+        and ("duration_seconds" not in info or "readable" not in info)
+    )
+    if not info or need_probe:
+        probed = filemeta.inspect_file(path, filename=filename, size_bytes=size_bytes, allow_probe=True)
+        prev_langs = [x.strip() for x in str(row_dict.get("langs") or "").split("·") if x.strip()]
+        merged_langs = filemeta._merge_audio_languages(prev_langs, probed.get("audio_languages") or [])
+        info.update(probed)
+        if merged_langs:
+            info["audio_languages"] = merged_langs
+        if path and row_dict.get("from_catalog"):
+            q_label = " · ".join(x for x in (info.get("quality"), info.get("source"), info.get("video_codec")) if x)
+            l_label = " · ".join(info.get("audio_languages") or [])
+            try:
+                db.update_catalog_file(
+                    path,
+                    media_info=filemeta.to_json(info),
+                    quality=q_label or row_dict.get("quality") or "",
+                    langs=l_label or row_dict.get("langs") or "",
+                )
+            except Exception:
+                pass
+
+    langs_list = info.get("audio_languages") or [
+        x.strip() for x in str(row_dict.get("langs") or "").split("·") if x.strip()
+    ]
+    subs_list = info.get("subtitle_languages") or []
+    dur_sec = _int(info.get("duration_seconds"))
+    dur_h = filemeta._format_duration(dur_sec) if dur_sec else ""
+    br = _int(info.get("bitrate_kbps"))
+    br_h = (f"{br / 1000:.1f} Mbps" if br >= 1000 else f"{br} kbps") if br else ""
+    quality = info.get("resolution") or info.get("quality") or row_dict.get("quality") or ""
+    readable = info.get("readable")
+    score = filemeta.score_version(info)
+
+    return {
+        "path": path,
+        "folder": os.path.dirname(path),
+        "filename": filename,
+        "size_bytes": info.get("size_bytes") or size_bytes,
+        "size_h": _human_size(info.get("size_bytes") or size_bytes),
+        "quality": quality,
+        "video_codec": info.get("video_codec") or "",
+        "bitrate_h": br_h,
+        "langs": " · ".join(langs_list),
+        "langs_list": langs_list,
+        "audio_tracks": " · ".join(info.get("audio_tracks") or []),
+        "subs": " · ".join(subs_list),
+        "duration_seconds": dur_sec,
+        "duration_h": dur_h,
+        "edition": info.get("edition") or "",
+        "readable": readable,
+        "score": score,
+        "notes": [],
+        "recommended": False,
+    }
+
+
+def probe_catalog_files(limit=80, progress=None):
+    """Analiza con ffprobe los archivos del Catálogo para descubrir su calidad
+    real (1080p/720p/4K), idioma de audio interno (Latino / Castellano / Inglés),
+    subtítulos, duración y si están íntegros."""
+    rows = [
+        r for r in db.list_catalog_files(missing=False)
+        if r["path"] and os.path.isfile(r["path"])
+    ]
+    pending = []
+    for r in rows:
+        info = filemeta.from_json(r["media_info"] if "media_info" in r.keys() else "")
+        if not info or "duration_seconds" not in info or not r["langs"] or not r["quality"]:
+            pending.append(r)
+
+    if limit:
+        pending = pending[:max(1, int(limit))]
+    total = len(pending)
+    done = 0
+    for r in pending:
+        done += 1
+        info = filemeta.inspect_file(r["path"], filename=r["filename"], size_bytes=r["size_bytes"], allow_probe=True)
+        prev_langs = [x.strip() for x in str(r["langs"] or "").split("·") if x.strip()]
+        merged_langs = filemeta._merge_audio_languages(prev_langs, info.get("audio_languages") or [])
+        if merged_langs:
+            info["audio_languages"] = merged_langs
+        q_parts = [x for x in (info.get("resolution") or info.get("quality"), info.get("source"), info.get("video_codec")) if x]
+        q_label = " · ".join(q_parts) or (r["quality"] or "")
+        l_label = " · ".join(info.get("audio_languages") or []) or (r["langs"] or "")
+        db.update_catalog_file(
+            r["path"],
+            media_info=filemeta.to_json(info),
+            quality=q_label,
+            langs=l_label,
+        )
+        if progress and (done % 5 == 0 or done == total):
+            progress({
+                "done": done,
+                "total": total,
+                "current": r["filename"],
+                "message": f"Analizando calidad e idiomas (ffprobe): {done}/{total}",
+            })
+    if done:
+        invalidate_build()
+    return {"probed": done, "total": total}
+
+
+def library_duplicates(catalog_rows=None):
+    """Películas de la biblioteca que están DUPLICADAS: mismo título+año o mismo
+    tmdb_id (con igual número de secuela/año) en dos o más archivos reales en disco.
+    Analiza cada copia con ffprobe para mostrar calidad, idioma (Latino vs Castellano),
+    duración (escenas extra), salud y cuál es la versión recomendada."""
+    rows = list(catalog_rows if catalog_rows is not None else db.list_catalog_files(missing=False))
+    by_real_path = {}
+    for r in rows:
+        if r["media_type"] != "movie":
+            continue
+        p = r["path"]
+        if not p or not os.path.isfile(p):
+            continue
+        rp = os.path.realpath(p)
+        by_real_path[rp] = {
+            "path": p,
+            "filename": r["filename"],
+            "size_bytes": r["size_bytes"] or 0,
+            "tmdb_id": _int(r["tmdb_id"]),
+            "title": r["title"] or r["filename"],
+            "year": r["year"],
+            "poster_url": r["poster_url"],
+            "quality": r["quality"] or "",
+            "langs": r["langs"] or "",
+            "media_info": r["media_info"] if "media_info" in r.keys() else "",
+            "from_catalog": True,
+        }
+    for it in db.list_items(status="done", media_type="movie"):
+        p = it["dest_path"]
+        if not p or not os.path.isfile(p):
+            continue
+        rp = os.path.realpath(p)
+        if rp in by_real_path:
+            continue
+        by_real_path[rp] = {
+            "path": p,
+            "filename": os.path.basename(p),
+            "size_bytes": it["size_bytes"] or 0,
+            "tmdb_id": _int(it["tmdb_id"]),
+            "title": it["chosen_title"] or it["detected_title"] or os.path.basename(p),
+            "year": it["chosen_year"] or it["detected_year"],
+            "poster_url": it["poster_url"],
+            "quality": it["quality"] or "",
+            "langs": it["langs"] or "",
+            "media_info": it["media_info"] or "",
+            "from_catalog": False,
+        }
+
     by_key = {}
-    for row in (catalog_rows if catalog_rows is not None else db.list_catalog_files(missing=False)):
-        if row["media_type"] != "movie":
-            continue
-        key = _dup_key(row["filename"], row["year"])
-        if key is None:
-            continue
-        by_key.setdefault(key, {})[row["path"]] = row  # dedup por ruta
+    for rp, entry in by_real_path.items():
+        tid = entry["tmdb_id"]
+        if tid:
+            key = ("tmdb", tid, _sequel_token(entry["filename"]), entry["year"] or 0)
+        else:
+            dup_k = _dup_key(entry["filename"], entry["year"])
+            if dup_k is None:
+                continue
+            key = ("name", dup_k[0], dup_k[1] or 0)
+        by_key.setdefault(key, {})[rp] = entry
 
     groups = []
-    for key, paths in by_key.items():
-        if len(paths) < 2:
+    for _key, path_map in by_key.items():
+        if len(path_map) < 2:
             continue
-        rows = list(paths.values())
-        copies = []
-        for r in rows:
-            copies.append({
-                "path": r["path"],
-                "folder": os.path.dirname(r["path"]),
-                "filename": r["filename"],
-                "size_bytes": r["size_bytes"] or 0,
-                "size_h": _human_size(r["size_bytes"] or 0),
-                "quality": r["quality"] or "",
-                "langs": r["langs"] or "",
-            })
-        copies.sort(key=lambda c: (-(c["size_bytes"] or 0), c["path"]))
-        first = max(rows, key=lambda r: bool(r["tmdb_id"]))
+        entries = list(path_map.values())
+        copies = [_enrich_copy_meta(e) for e in entries]
+        copies.sort(key=lambda c: (-c["score"], -(c["size_bytes"] or 0), c["path"]))
+        if copies:
+            copies[0]["recommended"] = True
+
+        durations = [c["duration_seconds"] for c in copies if c["duration_seconds"] > 0]
+        min_dur = min(durations) if len(durations) >= 2 else 0
+        for c in copies:
+            if c["readable"] is False:
+                c["notes"].append("⚠️ Archivo dañado o ilegible")
+            if "Castellano" in c["langs_list"] and "Latino" not in c["langs_list"]:
+                c["notes"].append("🇪🇸 Audio en Castellano (España)")
+            if min_dur > 0 and c["duration_seconds"] - min_dur >= 120:
+                extra_min = round((c["duration_seconds"] - min_dur) / 60)
+                c["notes"].append(f"🎬 +{extra_min} min más largo (posibles escenas extra / versión extendida)")
+
+        first = max(entries, key=lambda r: bool(r["tmdb_id"]))
         groups.append({
             "tmdb_id": _int(first["tmdb_id"]),
             "title": first["title"] or first["filename"],
@@ -819,6 +993,8 @@ def build_by_folder(catalog_rows=None):
                     vote["poster_url"] = row["poster_url"]
             continue
 
+        row_info = filemeta.from_json(row["media_info"] if "media_info" in row.keys() else "")
+        dur_h = filemeta._format_duration(_int(row_info.get("duration_seconds"))) if row_info else ""
         g["items"].append({
             "tmdb_id": _int(row["tmdb_id"]),
             "title": row["title"] or row["filename"],
@@ -827,6 +1003,8 @@ def build_by_folder(catalog_rows=None):
             "media_type": row["media_type"],
             "quality": row["quality"] or "",
             "langs": row["langs"] or "",
+            "size_h": _human_size(row["size_bytes"] or 0) if row["size_bytes"] else "",
+            "duration_h": dur_h,
             "path": row["path"],
             "episode_count": None,
         })
@@ -1740,6 +1918,8 @@ def _part_with_owned(part, owned_by_id):
         "dest_path": item["dest_path"] if item else "",
         "langs": item["langs"] if item else "",
         "quality": item["quality"] if item else "",
+        "size_h": item.get("size_h", "") if item else "",
+        "duration_h": item.get("duration_h", "") if item else "",
         "source": item["source"] if item else "",
     }
     return out
@@ -1756,6 +1936,8 @@ def _detail_to_movie(detail, owned=False, item=None):
         "dest_path": _val(item, "dest_path") if item else "",
         "langs": _val(item, "langs") if item else "",
         "quality": _val(item, "quality") if item else "",
+        "size_h": _val(item, "size_h") if item else "",
+        "duration_h": _val(item, "duration_h") if item else "",
         "source": _val(item, "source") if item else "",
     }
 
@@ -1770,11 +1952,15 @@ def _movie_from_item(item, owned=False):
         "dest_path": _val(item, "dest_path"),
         "langs": _val(item, "langs"),
         "quality": _val(item, "quality"),
+        "size_h": _val(item, "size_h") or "",
+        "duration_h": _val(item, "duration_h") or "",
         "source": _val(item, "source") or "organizer",
     }
 
 
 def _entry_from_item(item, source):
+    info = filemeta.from_json(item["media_info"] if "media_info" in item.keys() else "")
+    dur_h = filemeta._format_duration(_int(info.get("duration_seconds"))) if info else ""
     return {
         "tmdb_id": _int(item["tmdb_id"]),
         "filename": item["filename"],
@@ -1785,11 +1971,15 @@ def _entry_from_item(item, source):
         "dest_path": item["dest_path"] or item["original_path"],
         "langs": item["langs"],
         "quality": item["quality"],
+        "size_h": _human_size(item["size_bytes"] or 0) if item["size_bytes"] else "",
+        "duration_h": dur_h,
         "source": source,
     }
 
 
 def _entry_from_catalog_file(row):
+    info = filemeta.from_json(row["media_info"] if "media_info" in row.keys() else "")
+    dur_h = filemeta._format_duration(_int(info.get("duration_seconds"))) if info else ""
     return {
         "tmdb_id": _int(row["tmdb_id"]),
         "filename": row["filename"],
@@ -1800,6 +1990,8 @@ def _entry_from_catalog_file(row):
         "dest_path": row["path"],
         "langs": row["langs"],
         "quality": row["quality"],
+        "size_h": _human_size(row["size_bytes"] or 0) if row["size_bytes"] else "",
+        "duration_h": dur_h,
         "source": "scan",
     }
 

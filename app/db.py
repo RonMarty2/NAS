@@ -214,6 +214,7 @@ def init_db():
             "import_root": "TEXT",
             "season": "INTEGER",
             "episode": "INTEGER",
+            "media_info": "TEXT",
         }
         for col, coltype in catalog_migrations.items():
             if col not in existing_catalog:
@@ -305,7 +306,7 @@ def upsert_catalog_file(path, filename, size_bytes=0, mtime_ns=0, **fields):
     allowed = {
         "media_type", "tmdb_id", "title", "year", "poster_url", "overview",
         "quality", "langs", "last_seen", "missing", "source", "import_root",
-        "season", "episode",
+        "season", "episode", "media_info",
     }
     data = {k: v for k, v in fields.items() if k in allowed}
     data.setdefault("last_seen", time.time())
@@ -326,7 +327,7 @@ def upsert_catalog_file(path, filename, size_bytes=0, mtime_ns=0, **fields):
 def update_catalog_file(path, **fields):
     """Actualiza campos concretos de una fila del catálogo (por ruta)."""
     allowed = {"media_type", "tmdb_id", "title", "year", "poster_url", "overview",
-               "quality", "langs", "missing", "source", "match_attempts", "season", "episode"}
+               "quality", "langs", "missing", "source", "match_attempts", "season", "episode", "media_info"}
     data = {k: v for k, v in fields.items() if k in allowed}
     if not data:
         return
@@ -372,7 +373,7 @@ def update_catalog_files_bulk(paths, **fields):
     conexión+transacción cada una): minutos en un NAS modesto y el navegador
     parecía colgado. En lote es una sola transacción (<1s)."""
     allowed = {"media_type", "tmdb_id", "title", "year", "poster_url", "overview",
-               "quality", "langs", "missing", "source", "match_attempts", "season", "episode"}
+               "quality", "langs", "missing", "source", "match_attempts", "season", "episode", "media_info"}
     data = {k: v for k, v in fields.items() if k in allowed}
     paths = list(paths)
     if not data or not paths:
@@ -385,6 +386,54 @@ def update_catalog_files_bulk(paths, **fields):
             [(*vals, p) for p in paths],
         )
     return len(paths)
+
+
+def find_existing_library_paths(media_type, tmdb_id, season=None, episode=None):
+    """Devuelve las rutas de biblioteca ya registradas (catalog_files o items
+    movidos) que corresponden a la misma película o episodio de serie."""
+    try:
+        tid = int(tmdb_id or 0)
+    except (TypeError, ValueError):
+        tid = 0
+    if not tid or media_type not in ("movie", "series"):
+        return []
+    paths = []
+    seen = set()
+    with get_conn() as conn:
+        if media_type == "movie":
+            rows_c = conn.execute(
+                "SELECT path FROM catalog_files WHERE media_type='movie' AND tmdb_id=? AND missing=0",
+                (tid,),
+            ).fetchall()
+            rows_i = conn.execute(
+                "SELECT dest_path FROM items WHERE status='done' AND media_type='movie' AND tmdb_id=?",
+                (tid,),
+            ).fetchall()
+        else:
+            try:
+                s = int(season or 1)
+                e = int(episode or 1)
+            except (TypeError, ValueError):
+                return []
+            rows_c = conn.execute(
+                "SELECT path FROM catalog_files WHERE media_type='series' AND tmdb_id=? AND season=? AND episode=? AND missing=0",
+                (tid, s, e),
+            ).fetchall()
+            rows_i = conn.execute(
+                "SELECT dest_path FROM items WHERE status='done' AND media_type='series' AND tmdb_id=? AND season=? AND episode=?",
+                (tid, s, e),
+            ).fetchall()
+    for r in rows_c:
+        p = r["path"]
+        if p and p not in seen:
+            seen.add(p)
+            paths.append(p)
+    for r in rows_i:
+        p = r["dest_path"]
+        if p and p not in seen:
+            seen.add(p)
+            paths.append(p)
+    return paths
 
 
 def bump_catalog_match_attempts(paths):

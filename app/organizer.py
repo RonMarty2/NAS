@@ -475,25 +475,55 @@ def write_metadata(item, dest):
 
 def move_item(item, on_existing="error"):
     """Mueve el archivo (y subtítulos) a su destino. Devuelve (ok, dest_path, mensaje)."""
+    from . import db, targets
+
     src = item["original_path"]
     if not os.path.exists(src):
         return False, None, f"El archivo de origen ya no existe: {src}"
+
+    base = _g(item, "dest_folder") or default_base(_g(item, "media_type"))
+    target_info = targets.inspect(item, base)
+    old_copies = list(target_info.get("all_existing_paths") or [])
 
     dest = build_dest(item)
     try:
         os.makedirs(os.path.dirname(dest), exist_ok=True)
     except OSError as e:
         return False, None, f"No pude crear la carpeta destino: {e}"
-    if os.path.exists(dest):
+    if os.path.exists(dest) or target_info.get("exact_exists"):
         if on_existing == "keep_both":
             dest = unique_path(dest)
         elif on_existing != "replace":
-            return False, None, f"Ya existe en destino: {dest}. Compara versiones antes de decidir."
+            existing_ref = target_info.get("dest_path") or dest
+            return False, None, f"Ya existe en destino: {existing_ref}. Compara versiones antes de decidir."
 
     try:
         replaced = _replace_or_move(src, dest)
     except Exception as e:
         return False, None, f"Error al mover: {e}"
+
+    # Si el usuario eligió 'Reemplazar' y la copia vieja tenía otra extensión
+    # o estaba en otra ruta de la biblioteca, la eliminamos para no dejar dos copias.
+    if on_existing == "replace" and old_copies:
+        dest_real = os.path.realpath(dest)
+        for old_path in old_copies:
+            try:
+                if not old_path or not os.path.isfile(old_path):
+                    continue
+                if os.path.realpath(old_path) == dest_real:
+                    continue
+                os.remove(old_path)
+                replaced = True
+                old_stem = os.path.splitext(old_path)[0]
+                for aux in (old_stem + ".nfo", old_stem + "-thumb.jpg"):
+                    if os.path.isfile(aux):
+                        try:
+                            os.remove(aux)
+                        except OSError:
+                            pass
+                db.delete_catalog_file(old_path)
+            except OSError:
+                pass
 
     # Mover subtítulos asociados (solo vídeo), junto al vídeo.
     if item["media_type"] in ("movie", "series"):
@@ -517,6 +547,32 @@ def move_item(item, on_existing="error"):
 
     # Escribe .nfo + póster para que Jellyfin reconozca exacto (mejor esfuerzo).
     write_metadata(item, dest)
+
+    # Sincroniza también en catalog_files para que el Catálogo vea de inmediato
+    # la nueva versión con su calidad, idioma y media_info reales.
+    if _g(item, "media_type") in ("movie", "series") and os.path.isfile(dest):
+        try:
+            st = os.stat(dest)
+            db.upsert_catalog_file(
+                dest,
+                os.path.basename(dest),
+                size_bytes=st.st_size,
+                mtime_ns=st.st_mtime_ns,
+                media_type=_g(item, "media_type"),
+                tmdb_id=_g(item, "tmdb_id"),
+                title=_g(item, "chosen_title") or _g(item, "detected_title") or os.path.basename(dest),
+                year=_g(item, "chosen_year") or _g(item, "detected_year"),
+                poster_url=_g(item, "poster_url"),
+                overview=_g(item, "overview"),
+                quality=_g(item, "quality"),
+                langs=_g(item, "langs"),
+                season=_g(item, "season"),
+                episode=_g(item, "episode"),
+                media_info=_g(item, "media_info"),
+                import_root=base,
+            )
+        except Exception:
+            pass
 
     if replaced:
         return True, dest, "Movido correctamente. Se reemplazo el archivo existente."
