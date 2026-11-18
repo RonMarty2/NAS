@@ -1,31 +1,24 @@
 {% extends "base.html" %}
 {% block content %}
   <h1>Historial</h1>
-
-  <h2>✅ Movidos ({{ done|length }})</h2>
-  {% if done %}
-    <table>
-      <thead><tr><th>Archivo</th><th>Tipo</th><th>Destino</th><th>Fecha</th></tr></thead>
-      <tbody>
-      {% for it in done %}
-        <tr>
-          <td>{{ it["filename"] }}</td>
-          <td>{{ it["media_type"] }}</td>
-          <td class="path">{{ it["dest_path"] }}</td>
-          <td>{{ it["processed_at"] }}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  {% else %}<p class="empty">Aún no has movido nada.</p>{% endif %}
+  {% if msg %}<p class="ok">✅ {{ msg }}</p>{% endif %}
+  {% if err %}<p class="error">⚠️ {{ err }}</p>{% endif %}
 
   {% if errored %}
     <h2>⚠️ Con error ({{ errored|length }})</h2>
     <table>
-      <thead><tr><th>Archivo</th><th>Error</th></tr></thead>
+      <thead><tr><th>Archivo</th><th>Error</th><th></th></tr></thead>
       <tbody>
       {% for it in errored %}
-        <tr><td>{{ it["filename"] }}</td><td class="error">{{ it["error"] }}</td></tr>
+        <tr>
+          <td>{{ it["filename"] }}</td>
+          <td class="error">{{ it["error"] }}</td>
+          <td>
+            <form method="post" action="/item/{{ it['id'] }}/retry" style="margin:0;">
+              <button class="btn btn-secondary btn-sm" type="submit" title="Devolver a la cola de pendientes">🔄 Reintentar</button>
+            </form>
+          </td>
+        </tr>
       {% endfor %}
       </tbody>
     </table>
@@ -33,6 +26,67 @@
 
   {% if skipped %}
     <h2>⏭️ Omitidos ({{ skipped|length }})</h2>
-    <ul>{% for it in skipped %}<li>{{ it["filename"] }}</li>{% endfor %}</ul>
+    <table>
+      <thead><tr><th>Archivo</th><th>Tipo</th><th></th></tr></thead>
+      <tbody>
+      {% for it in skipped %}
+        <tr>
+          <td>{{ it["filename"] }}</td>
+          <td>{{ it["media_type"] }}</td>
+          <td>
+            <form method="post" action="/item/{{ it['id'] }}/retry" style="margin:0;">
+              <button class="btn btn-secondary btn-sm" type="submit" title="Volver a mostrar en pendientes">🔄 Volver a pendiente</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
   {% endif %}
+
+  <h2>✅ Movidos ({{ done_total if done_total is defined else done|length }})</h2>
+  {% if done %}
+    <div class="search-bar" style="margin:.5rem 0 1rem;">
+      <input id="historySearch" type="search" placeholder="Filtrar historial por nombre o ruta…" autocomplete="off">
+    </div>
+    {% if done_total is defined and done_total > done|length %}
+      <p class="meta">Mostrando los últimos {{ done|length }} de {{ done_total }}. <a href="/history?all_done=1">Ver todos</a></p>
+    {% elif all_done and done_total is defined and done_total > 100 %}
+      <p class="meta">Mostrando todos ({{ done_total }}). <a href="/history">Mostrar solo los últimos 100</a></p>
+    {% endif %}
+    <table id="historyTable">
+      <thead><tr><th>Archivo</th><th>Tipo</th><th>Destino</th><th>Fecha</th><th></th></tr></thead>
+      <tbody>
+      {% for it in done %}
+        <tr data-history-row>
+          <td>{{ it["filename"] }}</td>
+          <td>{{ it["media_type"] }}</td>
+          <td class="path">{{ it["dest_path"] }}</td>
+          <td>{{ it["processed_at"] }}</td>
+          <td>
+            {% if it["dest_path"] and it["original_path"] %}
+              <form method="post" action="/item/{{ it['id'] }}/undo" style="margin:0;"
+                    onsubmit="return confirm('¿Devolver «{{ it['filename']|e }}» a la carpeta de descargas y a la bandeja de pendientes?');">
+                <button class="btn btn-ghost btn-sm" type="submit" title="Devolver a descargas">↩️ Deshacer</button>
+              </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <script>
+      (function () {
+        var input = document.getElementById("historySearch");
+        if (!input) return;
+        var rows = Array.prototype.slice.call(document.querySelectorAll("[data-history-row]"));
+        input.addEventListener("input", function () {
+          var q = (input.value || "").trim().toLowerCase();
+          rows.forEach(function (r) {
+            r.hidden = Boolean(q && r.textContent.toLowerCase().indexOf(q) === -1);
+          });
+        });
+      })();
+    </script>
+  {% else %}<p class="empty">Aún no has movido nada.</p>{% endif %}
 {% endblock %}

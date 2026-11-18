@@ -523,3 +523,35 @@ def move_item(item, on_existing="error"):
     if on_existing == "keep_both":
         return True, dest, "Movido correctamente. Se conservaron ambas versiones."
     return True, dest, "Movido correctamente."
+
+
+def undo_move(item):
+    """Revierte un movimiento: devuelve el archivo desde `dest_path` a `original_path`.
+
+    Nunca sobrescribe si `original_path` ya volvió a existir. Devuelve (ok, mensaje).
+    """
+    src = _g(item, "original_path")
+    dest = _g(item, "dest_path")
+    if not dest or not os.path.exists(dest):
+        return False, "El archivo ya no se encuentra en la ruta destino."
+    if not src:
+        return False, "No se conoce la ruta original en descargas."
+    if os.path.exists(src):
+        return False, "Ya existe un archivo con ese nombre en la carpeta de descargas."
+
+    try:
+        os.makedirs(os.path.dirname(src), exist_ok=True)
+        _replace_or_move(dest, src)
+    except Exception as e:
+        return False, f"No se pudo devolver el archivo a descargas: {e}"
+
+    # Limpia metadata local asociada al archivo devuelto (.nfo / -thumb.jpg)
+    dest_stem = os.path.splitext(dest)[0]
+    for aux in (dest_stem + ".nfo", dest_stem + "-thumb.jpg"):
+        try:
+            if os.path.isfile(aux):
+                os.remove(aux)
+        except OSError:
+            pass
+
+    return True, "Movimiento deshecho: el archivo volvió a la bandeja de pendientes."

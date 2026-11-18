@@ -737,7 +737,7 @@ def tab(request: Request, media_type: str, dedup: int = 0):
                         g["target_exact_pending_ids"].append(ep["id"])
                     else:
                         g["target_unsafe_exact_count"] += 1
-        return templates.TemplateResponse("series.html", {
+        return templates.TemplateResponse(request, "series.html", {
             "request": request, "tabs": TABS, "active": media_type, "page": "tabs",
             "groups": groups, "has_processing": bool(processing),
             **_base_context(),
@@ -753,7 +753,7 @@ def tab(request: Request, media_type: str, dedup: int = 0):
     leaves = {it["id"]: organizer.leaf_path(it) for it in items}
     defaults = {it["id"]: (it["dest_folder"] or organizer.default_base(it["media_type"]))
                 for it in items}
-    return templates.TemplateResponse("index.html", {
+    return templates.TemplateResponse(request, "index.html", {
         "request": request, "tabs": TABS, "active": media_type,
         "items": items, "page": "tabs", "tab_counts": db.pending_counts(),
         **_base_context(),
@@ -1169,7 +1169,10 @@ def wishlist_page(request: Request, q: str = "", media_type: str = "movie"):
     media_type = media_type if media_type in ("movie", "series") else "movie"
     results = wishlist.search(q, media_type) if q.strip() else []
     items = wishlist.list_wishlist()
-    existing_ids = {int(r["tmdb_id"]) for r in db.list_wishlist()}  # sin filtrar (incluye ya obtenidos, para no reofrecerlos en resultados)
+    existing_ids = {
+        int(r["tmdb_id"]) for r in db.list_wishlist()
+        if r["media_type"] == media_type
+    }  # sin filtrar por owned (incluye ya obtenidos, para no reofrecerlos en resultados)
     return templates.TemplateResponse(request, "wishlist.html", {
         "request": request,
         "tabs": TABS,
@@ -1206,15 +1209,19 @@ def wishlist_remove(item_id: int = Form(...)):
 
 
 @app.get("/history", response_class=HTMLResponse)
-def history(request: Request):
+def history(request: Request, all_done: int = 0, msg: str = "", err: str = ""):
     dedup_notice = _dedup_notice()
     delete_dup_notice = _delete_dup_notice()
-    done = db.list_items(status="done")
+    done_all = db.list_items(status="done")
+    done_limit = len(done_all) if all_done else 100
+    done = done_all[:done_limit]
     skipped = db.list_items(status="skipped")
     errored = db.list_items(status="error")
-    return templates.TemplateResponse("history.html", {
+    return templates.TemplateResponse(request, "history.html", {
         "request": request, "tabs": TABS, "active": "history",
-        "done": done, "skipped": skipped, "errored": errored, "page": "history",
+        "done": done, "done_total": len(done_all), "all_done": bool(all_done),
+        "skipped": skipped, "errored": errored, "page": "history",
+        "msg": msg, "err": err,
         "tab_counts": db.pending_counts(),
         **_base_context(),
         "dedup_running": bool(dedup_notice.get("running")),
@@ -1222,11 +1229,45 @@ def history(request: Request):
     })
 
 
+@app.post("/item/{item_id}/retry")
+def retry_item(item_id: int):
+    """Devuelve un item con error u omitido a la cola de pendientes."""
+    item = db.get_item(item_id)
+    if not item:
+        return RedirectResponse("/history?err=" + quote("El registro ya no existe."), status_code=303)
+    if item["status"] in ("error", "skipped"):
+        db.update_item(item_id, status="pending", error=None, processed_at=None, match_attempts=0)
+        catalog.invalidate_build()
+    return RedirectResponse(
+        "/history?msg=" + quote(f"«{item['filename']}» volvió a la bandeja de pendientes."),
+        status_code=303,
+    )
+
+
+@app.post("/item/{item_id}/undo")
+def undo_item(item_id: int):
+    """Deshace un movimiento completado: devuelve el archivo a descargas y a pendiente."""
+    item = db.get_item(item_id)
+    if not item or item["status"] != "done":
+        return RedirectResponse("/history?err=" + quote("Ese elemento no se puede deshacer."), status_code=303)
+    dest_path = item["dest_path"]
+    with IO_LOCK:
+        ok, message = organizer.undo_move(item)
+    if not ok:
+        return RedirectResponse("/history?err=" + quote(message), status_code=303)
+    if dest_path:
+        db.delete_catalog_file(dest_path)
+    db.update_item(item_id, status="pending", dest_path=None, processed_at=None, error=None)
+    catalog.invalidate_build()
+    _schedule_jellyfin_refresh()
+    return RedirectResponse("/history?msg=" + quote(message), status_code=303)
+
+
 @app.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, saved: bool = False, msg: str = ""):
     dedup_notice = _dedup_notice()
     delete_dup_notice = _delete_dup_notice()
-    return templates.TemplateResponse("settings.html", {
+    return templates.TemplateResponse(request, "settings.html", {
         "request": request, "tabs": TABS, "active": "settings",
         "cfg": config.as_dict(), "saved": saved, "msg": msg, "page": "settings",
         "tab_counts": db.pending_counts(),
@@ -1583,7 +1624,7 @@ def conflict_form(request: Request, item_id: int):
         media_info=item["media_info"],
     )
     existing = _file_summary(target["dest_path"])
-    return templates.TemplateResponse("conflict.html", {
+    return templates.TemplateResponse(request, "conflict.html", {
         "request": request,
         "tabs": TABS,
         "active": item["media_type"],
@@ -1743,9 +1784,13 @@ def search_form(request: Request, item_id: int, q: str = ""):
     item = db.get_item(item_id)
     results = []
     if q and item and item["media_type"] in ("movie", "series"):
-        results = tmdb.search(q, item["media_type"])
-    return templates.TemplateResponse("search_results.html", {
-        "request": request, "item": item, "results": results, "q": q,
+        results = catalog.search_candidates(q, item["media_type"])
+    active_tab = item["media_type"] if item and item["media_type"] in ("movie", "series", "music") else "movie"
+    return templates.TemplateResponse(request, "search_results.html", {
+        "request": request, "tabs": TABS, "active": active_tab,
+        "tab_counts": db.pending_counts(),
+        "item": item, "results": results, "q": q,
+        "tmdb_configured": tmdb.configured(),
         **_base_context(),
         "dedup_running": bool(_dedup_state().get("running")),
         "delete_dup_running": bool(_delete_dup_state().get("running")),
@@ -1768,8 +1813,10 @@ def choose(item_id: int, tmdb_id: int = Form(...), title: str = Form(...),
 def edit_music_form(request: Request, item_id: int, q: str = ""):
     item = db.get_item(item_id)
     candidates = music_meta.search_candidates(q) if q else []
-    return templates.TemplateResponse("edit_music.html", {
-        "request": request, "item": item, "candidates": candidates, "q": q,
+    return templates.TemplateResponse(request, "edit_music.html", {
+        "request": request, "tabs": TABS, "active": "music",
+        "tab_counts": db.pending_counts(),
+        "item": item, "candidates": candidates, "q": q,
         **_base_context(),
         "dedup_running": bool(_dedup_state().get("running")),
         "delete_dup_running": bool(_delete_dup_state().get("running")),
@@ -1802,7 +1849,9 @@ def manual_scan(from_tab: str = Form("")):
     # Volvemos a donde estaba el usuario (no siempre a Películas).
     if from_tab in ("movie", "series", "music"):
         return RedirectResponse(f"/tab/{from_tab}", status_code=303)
-    if from_tab in ("history", "settings"):
+    if from_tab == "missing":
+        return RedirectResponse("/faltantes", status_code=303)
+    if from_tab in ("catalog", "wishlist", "health", "history", "settings"):
         return RedirectResponse(f"/{from_tab}", status_code=303)
     return RedirectResponse("/", status_code=303)
 

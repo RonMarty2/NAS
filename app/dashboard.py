@@ -17,6 +17,12 @@ _cache_at = 0.0
 _cache_lock = threading.Lock()
 
 
+def invalidate():
+    """Olvida el resumen en caché para que la próxima carga recalcule al instante."""
+    global _cache
+    _cache = None
+
+
 def _human_size(n):
     n = float(n or 0)
     for unit in ["B", "KB", "MB", "GB", "TB"]:

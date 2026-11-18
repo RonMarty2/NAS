@@ -122,7 +122,7 @@ def identify(path):
 
 
 def _spanish_episode_from_name(filename):
-    """Detecta patrones comunes en espaÃ±ol que guessit no entiende:
+    """Detecta patrones comunes en español que guessit no entiende:
     `Aida T10xC35.ts`, `Aida T10C35.ts`, `Aida T10x35.ts`.
     """
     stem = os.path.splitext(filename)[0]

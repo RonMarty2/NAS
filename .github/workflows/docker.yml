@@ -4,7 +4,7 @@ name: Construir imagen Docker
 # Así el NAS solo tiene que "bajar la última versión" (1 clic en Container Manager).
 on:
   push:
-    branches: ["main", "claude/**"]
+    branches: ["main"]
   workflow_dispatch:
 
 permissions:

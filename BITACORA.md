@@ -290,14 +290,14 @@ Pendiente: conectar Jellyfin (URL+API key), y elegir mejoras del roadmap (§8).
 - **Punto de separación** de las ramas: commit `aa01b44`. Todo lo anterior es común.
 - **Recomendación:** trabajar **solo en `main`** y mantener **una sola sesión** a la vez para no
   repetir el conflicto. Si hace falta, considerar borrar la rama vieja en GitHub.
-### SesiÃ³n 4 â€” 2026-06-09 (mejor feedback al borrar duplicados)
-- Se mejorÃ³ la UX de **borrado de duplicados** para que no parezca que "no pasa nada":
-  el botÃ³n ahora se desactiva al confirmar, el estado de limpieza se muestra junto al bloque
-  donde estÃ¡ el usuario y la pÃ¡gina se refresca sola mientras corre la verificaciÃ³n.
+### Sesión 4 — 2026-06-09 (mejor feedback al borrar duplicados)
+- Se mejoró la UX de **borrado de duplicados** para que no parezca que "no pasa nada":
+  el botón ahora se desactiva al confirmar, el estado de limpieza se muestra junto al bloque
+  donde está el usuario y la página se refresca sola mientras corre la verificación.
 - La limpieza sigue siendo la misma de siempre: **SHA-256**, conserva una copia legible y
-  no toca archivos que no sean idÃ©nticos.
-- Se mantuvo la informaciÃ³n de estado unos segundos al terminar para que el usuario vea
-  claramente que la acciÃ³n sÃ­ se ejecutÃ³.
+  no toca archivos que no sean idénticos.
+- Se mantuvo la información de estado unos segundos al terminar para que el usuario vea
+  claramente que la acción sí se ejecutó.
 ### Sesión 5 — 2026-06-09 (progreso visible para borrado en masa)
 - Se añadió **progreso real** al borrado en lote de duplicados: contador de archivos revisados,
   grupos procesados, archivos borrados y el archivo/grupo actual que se está calculando.

@@ -157,7 +157,7 @@
                 <div class="album-saga-top">
                   <div>
                     <h3>{{ saga.name }}</h3>
-                    <p>{{ saga.owned_count }} de {{ saga.total_count }} en tu biblioteca Â· {{ 'saga ampliada' if saga.custom else 'colecciÃ³n TMDB' }}</p>
+                    <p>{{ saga.owned_count }} de {{ saga.total_count }} en tu biblioteca · {{ 'saga ampliada' if saga.custom else 'colección TMDB' }}</p>
                   </div>
                   {% if saga.missing_count %}
                     <span class="album-chip warn">Faltan {{ saga.missing_count }}</span>
@@ -294,6 +294,9 @@
               </div>
               <strong>{{ show.title }}</strong>
               <small>{% if show.year %}{{ show.year }}{% endif %}{% if show.langs %} · {{ show.langs }}{% endif %}</small>
+              {% if show.path %}
+                <a class="fix-link" href="/catalog/fix?path={{ show.path|urlencode }}&media_type=series">✏️ Corregir</a>
+              {% endif %}
             </article>
           {% endfor %}
         </div>

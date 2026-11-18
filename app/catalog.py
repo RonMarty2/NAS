@@ -30,6 +30,11 @@ def invalidate_build():
     """Olvida el catálogo armado para que la próxima vista lo recalcule."""
     global _build_cache
     _build_cache = None
+    try:
+        from . import dashboard
+        dashboard.invalidate()
+    except Exception:
+        pass
 
 
 def status():
@@ -878,10 +883,14 @@ def owned_movie_ids():
 
 def owned_series_ids():
     """Conjunto de tmdb_id de series de las que el usuario ya tiene al menos un episodio."""
-    return {
+    ids = {
         _int(it["tmdb_id"]) for it in db.list_items(status="done", media_type="series")
         if _int(it["tmdb_id"])
     }
+    for row in db.list_catalog_files(missing=False):
+        if row["media_type"] == "series" and _int(row["tmdb_id"]):
+            ids.add(_int(row["tmdb_id"]))
+    return ids
 
 
 def build_discover():
