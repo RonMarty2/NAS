@@ -94,21 +94,33 @@
   {% endif %}
 
   <div class="decision-panel">
-    <form method="post" action="/item/{{ item['id'] }}/conflict/replace"
-          onsubmit="return confirmAndMarkSubmit(this, 'Se borrará el archivo antiguo de la biblioteca y se dejará el NUEVO como definitivo. ¿Continuar?', 'Reemplazando...');">
-      <button class="btn btn-primary" type="submit">🔄 Reemplazar con el nuevo (borrar el anterior)</button>
-    </form>
+    {% if pending_vs_pending and other_item %}
+      <form method="post" action="/item/{{ other_item['id'] }}/delete"
+            onsubmit="return confirmAndMarkDelete(this, 'Se borrará «{{ other_item['filename']|e }}» del disco y te quedarás con «{{ item['filename']|e }}». ¿Continuar?');">
+        <button class="btn btn-primary" type="submit">✅ Quedarme con «{{ item['filename'][:28] }}…» y borrar el otro</button>
+      </form>
+      <form method="post" action="/item/{{ item['id'] }}/delete"
+            onsubmit="return confirmAndMarkDelete(this, 'Se borrará «{{ item['filename']|e }}» del disco y te quedarás con «{{ other_item['filename']|e }}». ¿Continuar?');">
+        <button class="btn btn-danger" type="submit">🗑️ Quedarme con «{{ other_item['filename'][:28] }}…» y borrar este</button>
+      </form>
+      <a class="btn btn-ghost" href="/tab/{{ item['media_type'] }}">← Volver sin borrar nada</a>
+    {% else %}
+      <form method="post" action="/item/{{ item['id'] }}/conflict/replace"
+            onsubmit="return confirmAndMarkSubmit(this, 'Se borrará el archivo antiguo de la biblioteca y se dejará el NUEVO como definitivo. ¿Continuar?', 'Reemplazando...');">
+        <button class="btn btn-primary" type="submit">🔄 Reemplazar con el nuevo (borrar el anterior)</button>
+      </form>
 
-    <form method="post" action="/item/{{ item['id'] }}/conflict/keep-existing"
-          onsubmit="return confirmAndMarkDelete(this, 'Se conservará el archivo que ya está en tu biblioteca y se borrará el nuevo de descargas. ¿Continuar?');">
-      <button class="btn btn-danger" type="submit" {% if target.dest_size_bytes <= 0 %}disabled title="El archivo en destino pesa 0 bytes"{% endif %}>🗑️ Mantener existente y borrar el descargado</button>
-    </form>
+      <form method="post" action="/item/{{ item['id'] }}/conflict/keep-existing"
+            onsubmit="return confirmAndMarkDelete(this, 'Se conservará el archivo que ya está en tu biblioteca y se borrará el nuevo de descargas. ¿Continuar?');">
+        <button class="btn btn-danger" type="submit" {% if target.dest_size_bytes <= 0 %}disabled title="El archivo en destino pesa 0 bytes"{% endif %}>🗑️ Mantener existente y borrar el descargado</button>
+      </form>
 
-    <form method="post" action="/item/{{ item['id'] }}/conflict/keep-both"
-          onsubmit="return confirmAndMarkSubmit(this, 'Se conservarán ambas versiones. El nuevo se guardará con un nombre único tipo (2). ¿Continuar?', 'Moviendo...');">
-      <button class="btn btn-secondary" type="submit">📁 Mantener ambos (ej. versión extendida + normal)</button>
-    </form>
+      <form method="post" action="/item/{{ item['id'] }}/conflict/keep-both"
+            onsubmit="return confirmAndMarkSubmit(this, 'Se conservarán ambas versiones. El nuevo se guardará con un nombre único tipo (2). ¿Continuar?', 'Moviendo...');">
+        <button class="btn btn-secondary" type="submit">📁 Mantener ambos (ej. versión extendida + normal)</button>
+      </form>
 
-    <a class="btn btn-ghost" href="/tab/{{ item['media_type'] }}">← Volver</a>
+      <a class="btn btn-ghost" href="/tab/{{ item['media_type'] }}">← Volver</a>
+    {% endif %}
   </div>
 {% endblock %}

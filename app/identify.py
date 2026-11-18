@@ -76,6 +76,32 @@ def classify_extension(path):
     return None
 
 
+_GENERIC_TITLES = {"movie", "video", "pelicula", "película", "film", "full", "hd", "1080p", "720p"}
+
+
+def _parent_folder_hint(path):
+    """Si el archivo viene dentro de una subcarpeta de paquete (muy común en
+    JDownloader), devuelve el nombre de esa carpeta para rescatar título, año,
+    calidad o idioma que no estén en el nombre del archivo."""
+    parent_dir = os.path.dirname(os.path.abspath(path or ""))
+    parent_name = os.path.basename(parent_dir)
+    if not parent_name:
+        return ""
+    roots = {
+        os.path.abspath(r.strip())
+        for r in [config.get("downloads_dir"), *config.get("library_roots").split(",")]
+        if r and r.strip()
+    }
+    if os.path.abspath(parent_dir) in roots:
+        return ""
+    if re.match(r"^(?:season|temporada|temp|disc|cd)\s*\d+$", parent_name, re.I):
+        grand = os.path.dirname(parent_dir)
+        if os.path.abspath(grand) not in roots:
+            return os.path.basename(grand)
+        return ""
+    return parent_name
+
+
 def identify(path):
     """Devuelve un dict con: media_type, title, year, season, episode.
 
@@ -90,6 +116,8 @@ def identify(path):
 
     info = guessit(filename)
     fallback_episode = _spanish_episode_from_name(filename)
+    parent_hint = _parent_folder_hint(path)
+    parent_info = guessit(parent_hint) if parent_hint else {}
     gtype = info.get("type")  # 'movie' o 'episode'
 
     if fallback_episode:
@@ -109,11 +137,16 @@ def identify(path):
     if isinstance(episode, list):
         episode = episode[0] if episode else None
 
-    quality, langs = tech_info(filename)
+    title = fallback_episode["title"] if fallback_episode else info.get("title")
+    if (not title or str(title).strip().lower() in _GENERIC_TITLES) and parent_info.get("title"):
+        title = parent_info.get("title")
+    year = info.get("year") or parent_info.get("year")
+
+    quality, langs = tech_info(f"{parent_hint} {filename}" if parent_hint else filename)
     return {
         "media_type": media_type,
-        "title": fallback_episode["title"] if fallback_episode else info.get("title"),
-        "year": info.get("year"),
+        "title": title,
+        "year": year,
         "season": season,
         "episode": episode,
         "quality": quality,

@@ -34,7 +34,12 @@
   </div>
 {% elif dup and dup.similar_count > 1 %}
   <div class="dup-alert dup-alert-possible">
-    <strong>Posible duplicado</strong>
-    <span>{{ dup.similar_count }} archivos quedarían con el mismo nombre final. Compara peso, calidad e idioma antes de mover.</span>
+    <div>
+      <strong>Posible duplicado en descargas</strong>
+      <span>{{ dup.similar_count }} archivos pendientes quedarían con el mismo título final. Compara calidad, idioma, duración (escenas extra) y salud antes de mover.</span>
+    </div>
+    {% if dup.peer_id %}
+      <a class="btn btn-secondary btn-sm" href="/item/{{ item['id'] }}/compare-pending/{{ dup.peer_id }}">⚖️ Comparar cara a cara</a>
+    {% endif %}
   </div>
 {% endif %}

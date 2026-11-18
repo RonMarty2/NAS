@@ -29,7 +29,9 @@ def analyze(items):
         if len(group) < 2:
             continue
         for item in group:
+            other = next((g for g in group if g["id"] != item["id"]), None)
             result[item["id"]]["similar_count"] = len(group)
+            result[item["id"]]["peer_id"] = other["id"] if other else None
 
         by_size = {}
         for item in group:
@@ -458,6 +460,7 @@ def _empty():
         "exact_count": 0,
         "hash_short": "",
         "can_delete_exact": False,
+        "peer_id": None,
     }
 
 
@@ -466,7 +469,8 @@ def _leaf_key(item):
         leaf = organizer.leaf_path(item)
     except Exception:
         leaf = item["filename"]
-    return (leaf or "").replace("\\", "/").strip().lower()
+    stem = os.path.splitext(leaf or "")[0]
+    return stem.replace("\\", "/").strip().lower()
 
 
 def _current_size(item):

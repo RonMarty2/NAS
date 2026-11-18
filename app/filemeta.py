@@ -412,6 +412,8 @@ def _format_duration(value):
     seconds = _safe_int(value)
     if not seconds:
         return ""
+    if seconds < 60:
+        return f"{seconds}s"
     minutes = seconds // 60
     hours = minutes // 60
     minutes = minutes % 60

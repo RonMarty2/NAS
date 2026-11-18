@@ -1764,6 +1764,55 @@ def conflict_form(request: Request, item_id: int):
         "pending": pending,
         "existing": existing,
         "comparison": comparison,
+        "pending_vs_pending": False,
+        "other_item": None,
+    })
+
+
+@app.get("/item/{item_id}/compare-pending/{other_id}", response_class=HTMLResponse)
+def compare_pending_form(request: Request, item_id: int, other_id: int):
+    """Compara cara a cara con ffprobe dos descargas pendientes del mismo título."""
+    item = db.get_item(item_id)
+    other = db.get_item(other_id)
+    if not item or not other:
+        return RedirectResponse("/", status_code=303)
+
+    def _probe_and_save(it):
+        s = _file_summary(
+            it["original_path"],
+            filename=it["filename"],
+            size_bytes=it["size_bytes"],
+            media_info=it["media_info"],
+            force_probe=True,
+        )
+        if s.get("raw"):
+            langs_txt = " · ".join(s["raw"].get("audio_languages") or [])
+            db.update_item(
+                it["id"],
+                media_info=filemeta.to_json(s["raw"]),
+                quality=s["raw"].get("quality") or it["quality"],
+                langs=langs_txt or it["langs"],
+            )
+        return s
+
+    pending_b = _probe_and_save(item)
+    pending_a = _probe_and_save(other)
+    comparison = filemeta.compare_versions(pending_b.get("raw"), pending_a.get("raw"))
+    return templates.TemplateResponse(request, "conflict.html", {
+        "request": request,
+        "tabs": TABS,
+        "active": item["media_type"],
+        "tab_counts": db.pending_counts(),
+        **_base_context(),
+        "dedup_running": bool(_dedup_state().get("running")),
+        "delete_dup_running": bool(_delete_dup_state().get("running")),
+        "item": item,
+        "other_item": other,
+        "target": {"dest_path": other["original_path"], "dest_size_bytes": pending_a.get("raw", {}).get("size_bytes", 1)},
+        "pending": pending_b,
+        "existing": pending_a,
+        "comparison": comparison,
+        "pending_vs_pending": True,
     })
 
 
