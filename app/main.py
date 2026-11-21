@@ -2141,10 +2141,21 @@ def comparator_view(
 def comparator_scan(
     folder: str = Form(""),
     scan_all: str = Form(""),
+    only_media: str = Form("1"),
     view: str = Form("heaviest"),
 ):
-    ok, message = comparator.start_scan(folder=folder, scan_all=(scan_all == "1"))
+    ok, message = comparator.start_scan(
+        folder=folder,
+        scan_all=(scan_all == "1"),
+        only_media=(only_media != "0"),
+    )
     return _comp_redirect(view=view, msg="" if ok else message)
+
+
+@app.post("/comparador/clear")
+def comparator_clear(view: str = Form("heaviest")):
+    _, message = comparator.clear_index()
+    return _comp_redirect(view=view, msg=message)
 
 
 @app.post("/comparador/pause")

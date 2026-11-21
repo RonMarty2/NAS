@@ -11,17 +11,29 @@
       <div class="comp-scan-controls">
         <form method="post" action="/comparador/scan" class="comp-scan-form">
           <input type="hidden" name="view" value="{{ view }}">
+          <input type="hidden" name="only_media" value="1" id="compOnlyMediaHidden1">
           <div class="comp-path-row">
             <input id="compFolderInput" class="album-path" name="folder" value="{{ root or '' }}" placeholder="Carpeta en {{ allowed_base }} (ej. {{ allowed_base }}/video)">
             <button type="button" class="btn btn-secondary" onclick="openCompFolderPicker()">📂 Elegir</button>
             <button type="submit" class="btn btn-primary" {% if comp_state.running %}disabled{% endif %}>🔍 Escanear carpeta</button>
           </div>
         </form>
-        <form method="post" action="/comparador/scan" class="comp-scan-all-form" onsubmit="return confirm('¿Escanear todo {{ allowed_base }}?\n\nPuedes pausarlo o detenerlo en cualquier momento y todo lo escaneado quedará guardado.');">
+        <form method="post" action="/comparador/scan" class="comp-scan-all-form" onsubmit="return confirm('¿Escanear todo {{ allowed_base }}?\n\nIgnora carpetas internas del NAS (@* / #*) y puedes pausar o detener en cualquier momento guardando el avance.');">
           <input type="hidden" name="view" value="{{ view }}">
           <input type="hidden" name="scan_all" value="1">
+          <input type="hidden" name="only_media" value="1" id="compOnlyMediaHidden2">
           <button type="submit" class="btn btn-secondary" {% if comp_state.running %}disabled{% endif %}>🌐 Escanear todo ({{ allowed_base }})</button>
         </form>
+        <label class="comp-media-toggle" title="Desmarca solo si también quieres incluir documentos, ZIPs u otros archivos no multimedia">
+          <input type="checkbox" id="compOnlyMediaCheck" checked onchange="syncOnlyMedia(this.checked)">
+          <span>🎬 Solo audiovisuales (video, audio, fotos)</span>
+        </label>
+        {% if stats.total_files and not comp_state.running %}
+          <form method="post" action="/comparador/clear" onsubmit="return confirm('¿Vaciar el registro del comparador para empezar limpio?\n\nNO borra ningún archivo de tu NAS.');">
+            <input type="hidden" name="view" value="{{ view }}">
+            <button type="submit" class="btn btn-ghost btn-sm">🧹 Vaciar registro</button>
+          </form>
+        {% endif %}
       </div>
     </section>
 
@@ -32,18 +44,21 @@
       </div>
     {% endif %}
 
-    {# ---- Banner en vivo con Pausar / Reanudar / Detener ---- #}
-    <div id="compLiveBanner" class="scan-banner {{ 'running' if comp_state.running else ('done' if comp_state.visible else 'hidden') }}">
+    {# ---- Banner en vivo con indicador visual animado + Pausar / Reanudar / Detener ---- #}
+    <div id="compLiveBanner" class="comp-live-card {{ 'is-paused' if comp_state.paused else ('is-running' if comp_state.running else ('is-done' if comp_state.visible else 'hidden')) }}">
       <div class="comp-banner-head">
-        <div>
-          <strong id="compBannerTitle">
-            {% if comp_state.paused %}⏸️ Escaneo en pausa
-            {% elif comp_state.running %}🔍 Escaneando...
-            {% elif comp_state.phase == 'stopped' %}⏹️ Escaneo detenido (avance guardado)
-            {% elif comp_state.phase == 'error' %}⚠️ Error en el escaneo
-            {% else %}✅ Escaneo terminado{% endif %}
-          </strong>
-          <span id="compBannerMsg">{{ comp_state.message }}</span>
+        <div class="comp-banner-status">
+          <span id="compLiveDot" class="comp-live-dot {{ 'paused' if comp_state.paused else ('active' if comp_state.running else 'done') }}"></span>
+          <div>
+            <strong id="compBannerTitle">
+              {% if comp_state.paused %}⏸️ Escaneo en pausa
+              {% elif comp_state.running %}TRABAJANDO — Escaneando archivos...
+              {% elif comp_state.phase == 'stopped' %}⏹️ Escaneo detenido (avance guardado)
+              {% elif comp_state.phase == 'error' %}⚠️ Error en el escaneo
+              {% else %}✅ Escaneo terminado{% endif %}
+            </strong>
+            <div id="compBannerMsg" class="comp-banner-msg">{{ comp_state.message }}</div>
+          </div>
         </div>
         <div id="compLiveButtons" class="comp-live-btns {% if not comp_state.running %}hidden{% endif %}">
           <form method="post" action="/comparador/pause" id="btnCompPause" class="{% if comp_state.paused %}hidden{% endif %}">
@@ -58,7 +73,19 @@
             <input type="hidden" name="view" value="{{ view }}">
             <button type="submit" class="btn btn-danger btn-sm">⏹️ Detener y guardar</button>
           </form>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="location.reload()" title="Refresca la lista de abajo con lo que ya encontró">🔄 Ver avance</button>
         </div>
+      </div>
+
+      <div id="compCounters" class="comp-live-counters {% if not comp_state.running %}hidden{% endif %}">
+        <span>Vistos: <strong id="cSeen">{{ comp_state.seen or 0 }}</strong></span>
+        <span>Nuevos: <strong id="cAdded">{{ comp_state.added or 0 }}</strong></span>
+        <span>Sin cambios: <strong id="cSkipped">{{ comp_state.skipped or 0 }}</strong></span>
+        <span id="cHashWrap" class="{% if not comp_state.hash_total %}hidden{% endif %}">Huellas: <strong id="cHashed">{{ comp_state.hashed or 0 }}</strong>/<span id="cHashTotal">{{ comp_state.hash_total or 0 }}</span></span>
+      </div>
+
+      <div id="compIndetBar" class="comp-indet-bar {% if not (comp_state.running and not comp_state.paused and not comp_state.hash_total) %}hidden{% endif %}">
+        <div class="comp-indet-fill"></div>
       </div>
       <progress id="compProgress" class="dedup-progress {% if not (comp_state.running and comp_state.hash_total) %}hidden{% endif %}" value="{{ comp_state.hashed or 0 }}" max="{{ comp_state.hash_total or 1 }}"></progress>
       <small id="compCurrent" class="comp-current-path">{{ comp_state.current }}</small>
@@ -368,6 +395,14 @@
   </div>
 
   <script>
+    function syncOnlyMedia(checked) {
+      var val = checked ? "1" : "0";
+      var h1 = document.getElementById("compOnlyMediaHidden1");
+      var h2 = document.getElementById("compOnlyMediaHidden2");
+      if (h1) h1.value = val;
+      if (h2) h2.value = val;
+    }
+
     // ---- Sondeo en vivo del escaneo del comparador ----
     (function () {
       var running = {{ 'true' if comp_state.running else 'false' }};
@@ -376,35 +411,58 @@
         fetch("/api/comparador/status", { cache: "no-store" })
           .then(function (r) { return r.json(); })
           .then(function (st) {
+            var card = document.getElementById("compLiveBanner");
+            var dot = document.getElementById("compLiveDot");
             var title = document.getElementById("compBannerTitle");
             var msg = document.getElementById("compBannerMsg");
             var cur = document.getElementById("compCurrent");
             var prog = document.getElementById("compProgress");
+            var indet = document.getElementById("compIndetBar");
             var pBtn = document.getElementById("btnCompPause");
             var rBtn = document.getElementById("btnCompResume");
             if (msg) msg.textContent = st.message || "";
             if (cur) cur.textContent = st.current || "";
+            var cSeen = document.getElementById("cSeen");
+            var cAdded = document.getElementById("cAdded");
+            var cSkipped = document.getElementById("cSkipped");
+            if (cSeen) cSeen.textContent = st.seen || 0;
+            if (cAdded) cAdded.textContent = st.added || 0;
+            if (cSkipped) cSkipped.textContent = st.skipped || 0;
             if (title) {
-              title.textContent = st.paused ? "⏸️ Escaneo en pausa" : (st.running ? "🔍 Escaneando..." : "✅ Terminado");
+              title.textContent = st.paused ? "⏸️ Escaneo en pausa" : (st.running ? "TRABAJANDO — Escaneando archivos..." : "✅ Terminado");
+            }
+            if (card) {
+              card.classList.toggle("is-paused", !!st.paused);
+              card.classList.toggle("is-running", !!st.running && !st.paused);
+            }
+            if (dot) {
+              dot.className = "comp-live-dot " + (st.paused ? "paused" : (st.running ? "active" : "done"));
             }
             if (pBtn && rBtn) {
               pBtn.classList.toggle("hidden", !!st.paused);
               rBtn.classList.toggle("hidden", !st.paused);
             }
-            if (prog && st.hash_total) {
-              prog.classList.remove("hidden");
-              prog.max = st.hash_total;
-              prog.value = st.hashed || 0;
+            if (st.hash_total) {
+              var hw = document.getElementById("cHashWrap");
+              if (hw) hw.classList.remove("hidden");
+              var ch = document.getElementById("cHashed");
+              var ct = document.getElementById("cHashTotal");
+              if (ch) ch.textContent = st.hashed || 0;
+              if (ct) ct.textContent = st.hash_total || 0;
+              if (indet) indet.classList.add("hidden");
+              if (prog) { prog.classList.remove("hidden"); prog.max = st.hash_total; prog.value = st.hashed || 0; }
+            } else if (indet) {
+              indet.classList.toggle("hidden", !!st.paused || !st.running);
             }
             if (!st.running) {
               location.reload();
               return;
             }
-            setTimeout(poll, 1500);
+            setTimeout(poll, 1200);
           })
           .catch(function () { setTimeout(poll, 3000); });
       }
-      setTimeout(poll, 1200);
+      setTimeout(poll, 1000);
     })();
 
     // ---- Navegador de carpetas bajo /volume1 ----

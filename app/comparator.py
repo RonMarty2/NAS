@@ -120,6 +120,25 @@ _NOISE_RE = re.compile(
 def init_db():
     with db._lock, db.get_conn() as conn:
         conn.executescript(_SCHEMA)
+        # Limpia automáticamente cualquier archivo interno de sistema Synology (@* / #*)
+        # que pudiera haberse colado en una versión anterior.
+        conn.execute(
+            "DELETE FROM comparator_files WHERE path LIKE '%/@%' OR path LIKE '%/#%' OR path LIKE '%\\@%' OR path LIKE '%\\#%'"
+        )
+        conn.execute(
+            "DELETE FROM comparator_roots WHERE root_path LIKE '%/@%' OR root_path LIKE '%/#%'"
+        )
+
+
+def clear_index():
+    """Vacía todo el registro del comparador (NO borra ningún archivo del disco)."""
+    if _STATE.get("running"):
+        return False, "Detén el escaneo antes de vaciar el registro."
+    with db._lock, db.get_conn() as conn:
+        conn.execute("DELETE FROM comparator_files WHERE trashed = 0")
+        conn.execute("DELETE FROM comparator_roots")
+    _set_state(message="Registro vaciado (tus archivos en el NAS no se tocaron).", phase="idle", seen=0, added=0, updated=0, skipped=0)
+    return True, "Registro vaciado (tus archivos en el NAS no se tocaron)."
 
 
 def recover_state():
@@ -299,7 +318,7 @@ def browse_folders(path=""):
 
 # ---------------- Escaneo incremental con Pausa / Reanudar / Detener ----------------
 
-def start_scan(folder="", scan_all=False):
+def start_scan(folder="", scan_all=False, only_media=True):
     target = allowed_base() if scan_all else (folder or "").strip()
     if not target:
         return False, "Elige una carpeta o pulsa Escanear todo."
@@ -312,13 +331,14 @@ def start_scan(folder="", scan_all=False):
 
     _STOP_EVENT.clear()
     _PAUSE_EVENT.set()
+    mode_label = "audiovisuales" if only_media else "todos los archivos"
     _set_state(
         running=True,
         paused=False,
         stopping=False,
         phase="scanning",
         target=target,
-        message=f"Escaneando {target}...",
+        message=f"Escaneando {mode_label} en {target}...",
         seen=0,
         added=0,
         updated=0,
@@ -331,7 +351,12 @@ def start_scan(folder="", scan_all=False):
         finished_at="",
     )
 
-    t = threading.Thread(target=_scan_worker, args=(target,), name="nas-comparator-scan", daemon=True)
+    t = threading.Thread(
+        target=_scan_worker,
+        args=(target, bool(only_media)),
+        name="nas-comparator-scan",
+        daemon=True,
+    )
     t.start()
     return True, f"Escaneo iniciado en {target}."
 
@@ -381,7 +406,7 @@ def _wait_if_paused():
 
 def _skip_dir(name, full_path, trash_real):
     low = (name or "").lower()
-    if low in SKIP_DIR_NAMES or low.startswith("@eadir") or low.startswith("."):
+    if low in SKIP_DIR_NAMES or low.startswith(("@", "#", ".")):
         return True
     try:
         if os.path.realpath(full_path) == trash_real:
@@ -478,7 +503,7 @@ def _refresh_root_stats(target, status_label):
         )
 
 
-def _scan_worker(target):
+def _scan_worker(target, only_media=True):
     scan_ts = time.time()
     trash_real = os.path.realpath(trash_dir())
     seen = 0
@@ -510,11 +535,16 @@ def _scan_worker(target):
             dirs[:] = sorted(
                 d for d in dirs if not _skip_dir(d, os.path.join(dirpath, d), trash_real)
             )
+            _set_state(current=dirpath)
             for name in files:
                 if not _wait_if_paused():
                     stopped = True
                     break
                 if name.startswith("."):
+                    continue
+                ext = os.path.splitext(name)[1].lower()
+                kind = _classify_kind(ext)
+                if only_media and kind == "other":
                     continue
                 fpath = os.path.join(dirpath, name)
                 seen += 1
@@ -535,18 +565,16 @@ def _scan_worker(target):
                         updated += 1
                     else:
                         added += 1
-                    ext = os.path.splitext(name)[1].lower()
-                    kind = _classify_kind(ext)
                     upserts.append((
                         fpath, target, name, normalize_name(name), ext, kind, size_b, mtime, scan_ts
                     ))
 
-                if len(upserts) + len(seen_unchanged) >= 60:
+                if len(upserts) + len(seen_unchanged) >= 40:
                     _flush_batch(upserts, seen_unchanged, scan_ts)
                     upserts.clear()
                     seen_unchanged.clear()
 
-                if seen % 25 == 0:
+                if seen % 15 == 0:
                     _set_state(
                         seen=seen,
                         added=added,
@@ -555,7 +583,7 @@ def _scan_worker(target):
                         errors=errors,
                         current=fpath,
                         message=(
-                            f"Escaneando {target}: {seen} vistos "
+                            f"Escaneando {target}: {seen} audiovisuales "
                             f"({added} nuevos, {updated} cambiados, {skipped} sin cambios)..."
                         ),
                     )

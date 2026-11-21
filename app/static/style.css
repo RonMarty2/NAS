@@ -885,3 +885,21 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
 .comp-facts { font-size: .86rem; display: flex; flex-direction: column; gap: .2rem; }
 .comp-pane-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: auto; padding-top: .3rem; }
 .comp-no-preview { padding: 1.5rem; text-align: center; opacity: .75; background: rgba(0,0,0,.25); border-radius: 8px; }
+
+.hidden { display: none !important; }
+.comp-media-toggle { display: inline-flex; align-items: center; gap: .4rem; font-size: .88rem; cursor: pointer; opacity: .9; }
+.comp-live-card { margin: .8rem 0; padding: .9rem 1rem; border-radius: 12px; border: 1px solid #2c3545; background: #141c27; display: flex; flex-direction: column; gap: .55rem; }
+.comp-live-card.is-running { border-color: #00a4dc; background: linear-gradient(135deg, rgba(0,164,220,.14), rgba(20,28,39,.95)); }
+.comp-live-card.is-paused { border-color: #f0ad4e; background: linear-gradient(135deg, rgba(240,173,78,.14), rgba(20,28,39,.95)); }
+.comp-live-card.is-done { border-color: #2ecc71; }
+.comp-banner-status { display: flex; align-items: center; gap: .7rem; }
+.comp-banner-msg { font-size: .9rem; opacity: .88; margin-top: .15rem; }
+.comp-live-dot { width: 12px; height: 12px; border-radius: 50%; flex: 0 0 12px; background: #2ecc71; }
+.comp-live-dot.active { background: #00d2ff; box-shadow: 0 0 0 0 rgba(0,210,255,.7); animation: compPulse 1.4s infinite; }
+.comp-live-dot.paused { background: #f0ad4e; }
+@keyframes compPulse { 0% { box-shadow: 0 0 0 0 rgba(0,210,255,.7); } 70% { box-shadow: 0 0 0 10px rgba(0,210,255,0); } 100% { box-shadow: 0 0 0 0 rgba(0,210,255,0); } }
+.comp-live-counters { display: flex; flex-wrap: wrap; gap: .6rem; font-size: .86rem; }
+.comp-live-counters span { background: rgba(255,255,255,.06); padding: .25rem .55rem; border-radius: 6px; }
+.comp-indet-bar { width: 100%; height: 6px; border-radius: 999px; background: rgba(255,255,255,.1); overflow: hidden; }
+.comp-indet-fill { width: 35%; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #00a4dc, #46e2ff); animation: compSlide 1.3s ease-in-out infinite; }
+@keyframes compSlide { 0% { transform: translateX(-100%); } 100% { transform: translateX(380%); } }
