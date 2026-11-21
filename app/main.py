@@ -3,17 +3,19 @@ import json
 import html
 import os
 import queue
+import shutil
+import subprocess
 import threading
 import time
 from typing import List
 from urllib.parse import quote
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from . import catalog, config, dashboard, db, duplicates, filemeta, folders, health, jellyfin, organizer, targets, watcher, wishlist
+from . import catalog, comparator, config, dashboard, db, duplicates, filemeta, folders, health, jellyfin, organizer, targets, watcher, wishlist
 from .metadata import music as music_meta
 from .metadata import tmdb
 
@@ -74,6 +76,8 @@ def _startup():
     _recover_local_metadata_state()
     _recover_catalog_state()
     _recover_health_state()
+    comparator.init_db()
+    comparator.recover_state()
     _start_move_worker()
     watcher.start_background()
 
@@ -370,6 +374,7 @@ def _activity(scan_notice=None, local_metadata_notice=None, catalog_notice=None)
     counts = db.pending_counts()
 
     health_notice = health.status()
+    comp_notice = comparator.status()
     running_jobs = []
     if processing:
         running_jobs.append("moviendo archivos")
@@ -385,6 +390,8 @@ def _activity(scan_notice=None, local_metadata_notice=None, catalog_notice=None)
         running_jobs.append("actualizando catálogo")
     if health_notice.get("running"):
         running_jobs.append("analizando biblioteca")
+    if comp_notice.get("running"):
+        running_jobs.append("escaneando en Comparador")
     active = bool(running_jobs)
     sig = "|".join(str(x) for x in [
         processing, sum(counts.values()),
@@ -2055,9 +2062,293 @@ def manual_scan(from_tab: str = Form("")):
         return RedirectResponse(f"/tab/{from_tab}", status_code=303)
     if from_tab == "missing":
         return RedirectResponse("/faltantes", status_code=303)
+    if from_tab == "comparator":
+        return RedirectResponse("/comparador", status_code=303)
     if from_tab in ("catalog", "wishlist", "health", "history", "settings"):
         return RedirectResponse(f"/{from_tab}", status_code=303)
     return RedirectResponse("/", status_code=303)
+
+
+# ---------------- Comparador y limpieza incremental ----------------
+
+def _comp_redirect(view="heaviest", q="", kind="", root="", min_mb="", msg=""):
+    params = []
+    if view:
+        params.append(f"view={quote(str(view))}")
+    if q:
+        params.append(f"q={quote(str(q))}")
+    if kind:
+        params.append(f"kind={quote(str(kind))}")
+    if root:
+        params.append(f"root={quote(str(root))}")
+    if min_mb:
+        params.append(f"min_mb={quote(str(min_mb))}")
+    if msg:
+        params.append(f"msg={quote(str(msg))}")
+    qs = ("?" + "&".join(params)) if params else ""
+    return RedirectResponse(f"/comparador{qs}", status_code=303)
+
+
+@app.get("/comparador", response_class=HTMLResponse)
+def comparator_view(
+    request: Request,
+    view: str = "heaviest",
+    q: str = "",
+    kind: str = "",
+    root: str = "",
+    min_mb: str = "",
+    msg: str = "",
+):
+    comparator.init_db()
+    if view not in ("heaviest", "identical", "same_name", "trash"):
+        view = "heaviest"
+    try:
+        min_mb_val = float(min_mb) if str(min_mb).strip() else 0.0
+    except ValueError:
+        min_mb_val = 0.0
+
+    heaviest = comparator.list_heaviest(q=q, kind=kind, root=root, min_mb=min_mb_val) if view == "heaviest" else []
+    identical_groups = comparator.list_identical_groups(q=q, kind=kind, root=root, min_mb=min_mb_val) if view == "identical" else []
+    same_name_groups = comparator.list_same_name_groups(q=q, kind=kind, root=root, min_mb=min_mb_val) if view == "same_name" else []
+    trashed = comparator.list_trashed() if view == "trash" else []
+
+    return templates.TemplateResponse(request, "comparator.html", {
+        "request": request,
+        "tabs": TABS,
+        "active": "comparator",
+        "page": "comparator",
+        "tab_counts": db.pending_counts(),
+        **_base_context(),
+        "comp_state": comparator.status(),
+        "stats": comparator.summary_stats(),
+        "roots": comparator.list_roots(),
+        "allowed_base": comparator.allowed_base(),
+        "trash_dir": comparator.trash_dir(),
+        "view": view,
+        "q": q,
+        "kind": kind,
+        "root": root,
+        "min_mb": min_mb,
+        "msg": msg,
+        "heaviest": heaviest,
+        "identical_groups": identical_groups,
+        "same_name_groups": same_name_groups,
+        "trashed": trashed,
+    })
+
+
+@app.post("/comparador/scan")
+def comparator_scan(
+    folder: str = Form(""),
+    scan_all: str = Form(""),
+    view: str = Form("heaviest"),
+):
+    ok, message = comparator.start_scan(folder=folder, scan_all=(scan_all == "1"))
+    return _comp_redirect(view=view, msg="" if ok else message)
+
+
+@app.post("/comparador/pause")
+def comparator_pause(view: str = Form("heaviest")):
+    comparator.pause_scan()
+    return _comp_redirect(view=view)
+
+
+@app.post("/comparador/resume")
+def comparator_resume(view: str = Form("heaviest")):
+    comparator.resume_scan()
+    return _comp_redirect(view=view)
+
+
+@app.post("/comparador/stop")
+def comparator_stop(view: str = Form("heaviest")):
+    comparator.stop_scan()
+    return _comp_redirect(view=view)
+
+
+@app.post("/comparador/root/forget")
+def comparator_forget_root(root_path: str = Form(""), view: str = Form("heaviest")):
+    comparator.forget_root(root_path)
+    return _comp_redirect(view=view, msg=f"Carpeta quitada del registro (tus archivos no se tocaron): {root_path}")
+
+
+@app.post("/comparador/trash")
+def comparator_trash(
+    file_id: int = Form(...),
+    view: str = Form("heaviest"),
+    q: str = Form(""),
+    kind: str = Form(""),
+    root: str = Form(""),
+    min_mb: str = Form(""),
+):
+    _, message = comparator.trash_file(file_id)
+    return _comp_redirect(view=view, q=q, kind=kind, root=root, min_mb=min_mb, msg=message)
+
+
+@app.post("/comparador/restore")
+def comparator_restore(file_id: int = Form(...)):
+    _, message = comparator.restore_file(file_id)
+    return _comp_redirect(view="trash", msg=message)
+
+
+@app.post("/comparador/delete")
+def comparator_delete(
+    file_id: int = Form(...),
+    view: str = Form("heaviest"),
+    q: str = Form(""),
+    kind: str = Form(""),
+    root: str = Form(""),
+    min_mb: str = Form(""),
+):
+    _, message = comparator.delete_file_permanent(file_id)
+    return _comp_redirect(view=view, q=q, kind=kind, root=root, min_mb=min_mb, msg=message)
+
+
+@app.get("/api/comparador/status")
+def api_comparator_status():
+    return comparator.status()
+
+
+@app.get("/api/comparador/folders")
+def api_comparator_folders(path: str = ""):
+    return comparator.browse_folders(path)
+
+
+@app.get("/api/comparador/file/{file_id}")
+def api_comparator_file(file_id: int, probe: int = 0):
+    item = comparator.probe_file(file_id) if probe else comparator.get_file(file_id)
+    if not item:
+        return Response(status_code=404)
+    return item
+
+
+@app.post("/api/comparador/trash/{file_id}")
+def api_comparator_trash(file_id: int):
+    ok, message = comparator.trash_file(file_id)
+    return {"ok": ok, "message": message}
+
+
+@app.post("/api/comparador/delete/{file_id}")
+def api_comparator_delete(file_id: int):
+    ok, message = comparator.delete_file_permanent(file_id)
+    return {"ok": ok, "message": message}
+
+
+@app.get("/api/comparador/thumbs/{file_id}")
+def api_comparator_thumbs(file_id: int):
+    thumbs = comparator.generate_thumbs(file_id, count=4)
+    return {"thumbs": thumbs}
+
+
+@app.get("/api/comparador/stream/{file_id}")
+def api_comparator_stream(file_id: int, request: Request):
+    """Streaming HTTP con soporte Range para reproducir video/audio/imagen sin cargar en RAM."""
+    item = comparator.get_file(file_id)
+    if not item:
+        return Response(status_code=404)
+    path = item["path"]
+    if not comparator.is_allowed_path(path) or not os.path.isfile(path):
+        return Response(status_code=404)
+
+    file_size = os.path.getsize(path)
+    media_type = comparator.guess_mime(path)
+    range_header = request.headers.get("range")
+    chunk_size = 256 * 1024
+
+    if range_header:
+        start = 0
+        end = file_size - 1
+        try:
+            unit, _, rng = range_header.partition("=")
+            if unit.strip().lower() == "bytes":
+                s_part, _, e_part = rng.split(",")[0].strip().partition("-")
+                if s_part:
+                    start = int(s_part)
+                    if e_part:
+                        end = int(e_part)
+                elif e_part:
+                    suffix = int(e_part)
+                    start = max(0, file_size - suffix)
+        except ValueError:
+            return Response(status_code=416)
+        if start >= file_size or end < start:
+            return Response(status_code=416, headers={"Content-Range": f"bytes */{file_size}"})
+        end = min(end, file_size - 1)
+        length = end - start + 1
+
+        def iter_range():
+            with open(path, "rb") as f:
+                f.seek(start)
+                remaining = length
+                while remaining > 0:
+                    data = f.read(min(chunk_size, remaining))
+                    if not data:
+                        break
+                    remaining -= len(data)
+                    yield data
+
+        headers = {
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(length),
+        }
+        return StreamingResponse(iter_range(), status_code=206, media_type=media_type, headers=headers)
+
+    def iter_full():
+        with open(path, "rb") as f:
+            while True:
+                data = f.read(chunk_size)
+                if not data:
+                    break
+                yield data
+
+    return StreamingResponse(
+        iter_full(),
+        media_type=media_type,
+        headers={"Accept-Ranges": "bytes", "Content-Length": str(file_size)},
+    )
+
+
+@app.get("/api/comparador/transcode/{file_id}")
+def api_comparator_transcode(file_id: int, start: float = 0.0):
+    """Transcodificación ligera al vuelo con ffmpeg para formatos que el navegador no reproduce (.mkv/.avi/AC3)."""
+    item = comparator.get_file(file_id)
+    if not item or not comparator.is_allowed_path(item["path"]) or not os.path.isfile(item["path"]):
+        return Response(status_code=404)
+    if not shutil.which("ffmpeg"):
+        return Response(content="ffmpeg no disponible", status_code=503)
+
+    cmd = ["ffmpeg", "-v", "error"]
+    if start and start > 0:
+        cmd.extend(["-ss", f"{float(start):.2f}"])
+    cmd.extend([
+        "-i", item["path"],
+        "-map", "0:v:0?", "-map", "0:a:0?",
+        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
+        "-vf", "scale='min(854,iw)':-2",
+        "-c:a", "aac", "-b:a", "128k", "-ac", "2",
+        "-movflags", "frag_keyframe+empty_moov+faststart",
+        "-f", "mp4", "pipe:1",
+    ])
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+    def iter_ffmpeg():
+        try:
+            while True:
+                data = proc.stdout.read(65536)
+                if not data:
+                    break
+                yield data
+        finally:
+            try:
+                proc.terminate()
+                proc.wait(timeout=3)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
+    return StreamingResponse(iter_ffmpeg(), media_type="video/mp4")
 
 
 @app.post("/jellyfin/refresh-full")
