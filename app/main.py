@@ -166,16 +166,52 @@ def music_cover(cover_name: str):
     return FileResponse(path, media_type=media_type)
 
 
+def _series_folder_hint(path):
+    """Extrae el nombre de la subcarpeta de serie bajo descargas (saltando
+    carpetas tipo 'Temporada 1' / 'Season 01' / 'T1') para agrupar episodios
+    cuyos nombres de archivo solo tienen el título del capítulo."""
+    if not path:
+        return ""
+    dl_dir = os.path.abspath((config.get("downloads_dir") or "").strip()) if config.get("downloads_dir") else ""
+    if not dl_dir:
+        return ""
+    cur = os.path.dirname(os.path.abspath(path))
+    if not cur.startswith(dl_dir + os.sep):
+        return ""
+    rel = os.path.relpath(cur, dl_dir)
+    parts = [p for p in rel.split(os.sep) if p and p != "."]
+    if not parts:
+        return ""
+    # La primera subcarpeta bajo descargas suele ser el nombre de la serie/paquete.
+    return parts[0]
+
+
 def _group_series(items):
-    """Agrupa los episodios pendientes por serie (una tarjeta por serie)."""
+    """Agrupa los episodios pendientes por serie (una tarjeta por serie).
+
+    Si los episodios aún no fueron reconocidos por TMDB pero vienen dentro de una
+    subcarpeta en descargas (p. ej. /descargas/MiSerie/Temporada 1/07 cap.mkv),
+    los agrupa por esa subcarpeta en vez de crear una tarjeta suelta por capítulo.
+    """
     groups = {}
     for it in items:
-        key = it["tmdb_id"] or (it["chosen_title"] or it["detected_title"] or "¿?").lower()
+        tmdb_id = it["tmdb_id"]
+        folder_hint = "" if tmdb_id else _series_folder_hint(it["original_path"])
+        if tmdb_id:
+            key = ("tmdb", tmdb_id)
+            display_title = it["chosen_title"] or it["detected_title"] or "¿?"
+        elif folder_hint:
+            key = ("folder", folder_hint.lower())
+            display_title = folder_hint
+        else:
+            raw_t = it["chosen_title"] or it["detected_title"] or "¿?"
+            key = ("title", raw_t.lower())
+            display_title = raw_t
         g = groups.get(key)
         if not g:
             g = {
                 "gid": "g%d" % len(groups),
-                "title": it["chosen_title"] or it["detected_title"] or "¿?",
+                "title": display_title,
                 "year": it["chosen_year"],
                 "poster_url": it["poster_url"],
                 "overview": it["overview"],
@@ -191,7 +227,7 @@ def _group_series(items):
         g["episodes"].append(it)
     result = list(groups.values())
     for g in result:
-        g["episodes"].sort(key=lambda x: ((x["season"] or 0), (x["episode"] or 0)))
+        g["episodes"].sort(key=lambda x: ((x["season"] or 0), (x["episode"] or 0), (x["filename"] or "").lower()))
         g["count"] = len(g["episodes"])
         g["processing"] = any(e["status"] == "processing" for e in g["episodes"])
     result.sort(key=lambda g: g["title"].lower())

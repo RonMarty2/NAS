@@ -96,12 +96,12 @@
   <div class="decision-panel">
     {% if pending_vs_pending and other_item %}
       <form method="post" action="/item/{{ other_item['id'] }}/delete"
-            onsubmit="return confirmAndMarkDelete(this, 'Se borrará «{{ other_item['filename']|e }}» del disco y te quedarás con «{{ item['filename']|e }}». ¿Continuar?');">
-        <button class="btn btn-primary" type="submit">✅ Quedarme con «{{ item['filename'][:28] }}…» y borrar el otro</button>
+            onsubmit="return confirmAndMarkDelete(this, 'Se borrará el ANTIGUO («{{ other_item['filename']|e }}») y te quedarás con el NUEVO («{{ item['filename']|e }}»). ¿Continuar?');">
+        <button class="btn btn-primary" type="submit">✅ Quedarme con el NUEVO ({{ item['filename'][:30] }}{% if item['filename']|length > 30 %}…{% endif %}) y borrar el antiguo</button>
       </form>
       <form method="post" action="/item/{{ item['id'] }}/delete"
-            onsubmit="return confirmAndMarkDelete(this, 'Se borrará «{{ item['filename']|e }}» del disco y te quedarás con «{{ other_item['filename']|e }}». ¿Continuar?');">
-        <button class="btn btn-danger" type="submit">🗑️ Quedarme con «{{ other_item['filename'][:28] }}…» y borrar este</button>
+            onsubmit="return confirmAndMarkDelete(this, 'Se borrará el NUEVO («{{ item['filename']|e }}») y te quedarás con el ANTIGUO («{{ other_item['filename']|e }}»). ¿Continuar?');">
+        <button class="btn btn-danger" type="submit">🗑️ Quedarme con el ANTIGUO ({{ other_item['filename'][:30] }}{% if other_item['filename']|length > 30 %}…{% endif %}) y borrar el nuevo</button>
       </form>
       <a class="btn btn-ghost" href="/tab/{{ item['media_type'] }}">← Volver sin borrar nada</a>
     {% else %}

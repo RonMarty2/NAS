@@ -138,8 +138,16 @@ def identify(path):
         episode = episode[0] if episode else None
 
     title = fallback_episode["title"] if fallback_episode else info.get("title")
-    if (not title or str(title).strip().lower() in _GENERIC_TITLES) and parent_info.get("title"):
-        title = parent_info.get("title")
+    parent_title = parent_info.get("title") if parent_info else None
+    if (not title or str(title).strip().lower() in _GENERIC_TITLES) and parent_title:
+        title = parent_title
+    elif media_type == "series" and parent_title:
+        # En series descargadas por carpeta (/descargas/NombreSerie/07 titulo_cap.mkv),
+        # el nombre del archivo a veces solo trae el título del episodio.
+        t_low = str(title or "").strip().lower()
+        p_low = str(parent_title).strip().lower()
+        if p_low and t_low and p_low not in t_low and t_low not in p_low:
+            title = parent_title
     year = info.get("year") or parent_info.get("year")
 
     quality, langs = tech_info(f"{parent_hint} {filename}" if parent_hint else filename)
