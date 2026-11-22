@@ -477,23 +477,43 @@ def build_missing():
 
     # Películas que YA tienes pero conviene reemplazar/mejorar: están en
     # Castellano (sin Latino), marcadas 'Por mejorar', o en baja resolución (<=720p).
-    upgrades = []
-    seen_upg = set()
-    for row in db.list_catalog_files(missing=False):
-        if row["media_type"] != "movie":
-            continue
+    # Si ya tienes otra copia buena del mismo tmdb_id (1080p+ y sin Castellano),
+    # no la listamos para mejorar.
+    movie_rows = [r for r in db.list_catalog_files(missing=False) if r["media_type"] == "movie"]
+
+    def _upgrade_reasons(row):
         langs_txt = (row["langs"] or "").lower()
         qual_txt = (row["quality"] or "").lower()
         reasons = []
+        tags = []
         if "por mejorar" in langs_txt:
             reasons.append("🔄 Marcada por mejorar")
+            tags.append("🔄 Por mejorar")
         if "castellano" in langs_txt and "latino" not in langs_txt and "dual" not in langs_txt:
             reasons.append("🇪🇸 Audio en Castellano (España)")
-        if re.search(r"\b(720p|576p|480p|360p|dvdrip|cam|ts)\b", qual_txt):
+            tags.append("🇪🇸 Castellano")
+        low_q = re.search(r"\b(720p|576p|480p|360p|dvdrip|cam|ts)\b", qual_txt)
+        if low_q:
             reasons.append(f"📉 Calidad mejorable ({row['quality']})")
+            tags.append(f"📉 {low_q.group(1)}")
+        return reasons, tags
+
+    good_tmdb_ids = set()
+    for row in movie_rows:
+        tid = _int(row["tmdb_id"])
+        if tid and not _upgrade_reasons(row)[0]:
+            good_tmdb_ids.add(tid)
+
+    upgrades = []
+    seen_upg = set()
+    for row in movie_rows:
+        tid = _int(row["tmdb_id"])
+        if tid and tid in good_tmdb_ids:
+            continue
+        reasons, tags = _upgrade_reasons(row)
         if not reasons:
             continue
-        key = row["tmdb_id"] or row["path"]
+        key = tid or row["path"]
         if key in seen_upg:
             continue
         seen_upg.add(key)
@@ -504,6 +524,7 @@ def build_missing():
             "quality": row["quality"] or "",
             "langs": row["langs"] or "",
             "reasons": " · ".join(reasons),
+            "reason_tags": tags,
             "path": row["path"],
         })
     upgrades.sort(key=lambda u: (u["title"] or "").lower())

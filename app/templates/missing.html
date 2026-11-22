@@ -6,8 +6,13 @@
         <span class="album-kicker">Lista de compras</span>
         <h1>Lo que te falta</h1>
         <p>
-          {{ missing.total_movies }} película(s) de tus sagas, {{ missing.total_episodes }} episodio(s) de tus series{% if missing.total_upgrades %} y {{ missing.total_upgrades }} película(s) para mejorar/reemplazar{% endif %}.
-          {% if missing.total_upcoming %}Además hay {{ missing.total_upcoming }} que aún no se estrenan.{% endif %}
+          Te faltan <strong>{{ missing.total_movies }} película(s)</strong> de tus sagas y <strong>{{ missing.total_episodes }} episodio(s)</strong> de tus series.
+          {% if missing.total_upgrades %}
+            Además tienes <strong>{{ missing.total_upgrades }} película(s) ya en tu biblioteca</strong> sugeridas para mejorar (idioma Castellano o ≤720p).
+          {% endif %}
+          {% if missing.total_upcoming %}
+            Hay {{ missing.total_upcoming }} que aún no se estrenan.
+          {% endif %}
         </p>
       </div>
     </section>
@@ -17,29 +22,41 @@
         <h2>¡No te falta nada!</h2>
         <p>Todas tus sagas y series están completas. Usa <a href="/wishlist">Deseos</a> para apuntar cosas nuevas que quieras conseguir.</p>
       </section>
+    {% else %}
+      <div class="missing-filters" role="tablist" aria-label="Filtrar secciones de faltantes">
+        <button type="button" class="missing-filter-btn active" data-missing-filter="all">Todas</button>
+        {% if missing.movies %}
+          <button type="button" class="missing-filter-btn" data-missing-filter="movies">🎬 Pelis que faltan <span class="mf-count">{{ missing.total_movies }}</span></button>
+        {% endif %}
+        {% if missing.shows %}
+          <button type="button" class="missing-filter-btn" data-missing-filter="shows">📺 Episodios <span class="mf-count">{{ missing.total_episodes }}</span></button>
+        {% endif %}
+        {% if missing.upgrades %}
+          <button type="button" class="missing-filter-btn mf-upgrade" data-missing-filter="upgrades">🔄 Ya las tienes (para mejorar) <span class="mf-count">{{ missing.total_upgrades }}</span></button>
+        {% endif %}
+        {% if missing.upcoming %}
+          <button type="button" class="missing-filter-btn" data-missing-filter="upcoming">🗓️ Próximos estrenos <span class="mf-count">{{ missing.total_upcoming }}</span></button>
+        {% endif %}
+      </div>
     {% endif %}
 
-    {% if missing.upgrades %}
-      <section class="album-section">
+    {% if missing.movies %}
+      <section class="album-section" data-missing-section="movies">
         <div class="album-section-head">
-          <h2>🔄 Para reemplazar o mejorar (idioma o calidad)</h2>
-          <span>{{ missing.total_upgrades }} película(s) en Castellano (España), baja resolución (≤720p) o marcadas por mejorar</span>
+          <h2>🎬 Películas de sagas que te faltan</h2>
+          <span>{{ missing.total_movies }} pendiente(s), ya estrenadas</span>
         </div>
         <div class="album-movie-grid">
-          {% for u in missing.upgrades %}
+          {% for m in missing.movies %}
             <article class="album-movie" data-album-card>
               <div class="album-movie-poster">
-                {% if u.poster_url %}
-                  <img src="{{ u.poster_url }}" alt="" loading="lazy" class="poster-zoom" data-title="{{ u.title }}{% if u.year %} ({{ u.year }}){% endif %}">
+                {% if m.poster_url %}
+                  <img src="{{ m.poster_url }}" alt="" loading="lazy" class="poster-zoom" data-title="{{ m.title }}{% if m.year %} ({{ m.year }}){% endif %}">
                 {% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
               </div>
-              <strong>{{ u.title }}</strong>
-              <small>{{ u.year or "" }}{% if u.quality %} · {{ u.quality }}{% endif %}{% if u.langs %} · {{ u.langs }}{% endif %}</small>
-              <small style="color: var(--warn); font-weight: 600;">{{ u.reasons }}</small>
-              <button type="button" class="btn btn-secondary copy-btn" data-copy="{{ u.title }}{% if u.year %} {{ u.year }}{% endif %} 1080p Latino">📋 Copiar para buscar</button>
-              {% if u.path %}
-                <a class="fix-link" href="/catalog/fix?path={{ u.path|urlencode }}&media_type=movie">✏️ Cambiar etiqueta</a>
-              {% endif %}
+              <strong>{{ m.title }}</strong>
+              <small>{{ m.year or "" }} · {{ m.collection }}</small>
+              <button type="button" class="btn btn-secondary copy-btn" data-copy="{{ m.title }}{% if m.year %} {{ m.year }}{% endif %}">📋 Copiar nombre</button>
             </article>
           {% endfor %}
         </div>
@@ -47,9 +64,9 @@
     {% endif %}
 
     {% if missing.shows %}
-      <section class="album-section">
+      <section class="album-section" data-missing-section="shows">
         <div class="album-section-head">
-          <h2>Episodios de series</h2>
+          <h2>📺 Episodios de series que te faltan</h2>
           <span>{{ missing.total_episodes }} episodio(s) en {{ missing.shows|length }} serie(s)</span>
         </div>
         <div class="missing-show-list">
@@ -83,23 +100,35 @@
       </section>
     {% endif %}
 
-    {% if missing.movies %}
-      <section class="album-section">
+    {% if missing.upgrades %}
+      <section class="album-section" data-missing-section="upgrades">
         <div class="album-section-head">
-          <h2>Películas de sagas</h2>
-          <span>{{ missing.total_movies }} pendiente(s), ya estrenadas</span>
+          <h2>🔄 Ya las tienes — sugeridas para mejorar</h2>
+          <span>{{ missing.total_upgrades }} película(s) en tu biblioteca</span>
         </div>
+        <p class="upgrade-explainer">
+          ✓ <strong>Estas películas SÍ están en tu NAS.</strong> Salen aquí solo como recordatorio porque están en <strong>Castellano (España)</strong>, en <strong>baja calidad (≤720p)</strong> o marcadas por mejorar. Si alguna sí es Latino, usa <em>Cambiar etiqueta</em>.
+        </p>
         <div class="album-movie-grid">
-          {% for m in missing.movies %}
+          {% for u in missing.upgrades %}
             <article class="album-movie" data-album-card>
               <div class="album-movie-poster">
-                {% if m.poster_url %}
-                  <img src="{{ m.poster_url }}" alt="" loading="lazy" class="poster-zoom" data-title="{{ m.title }}{% if m.year %} ({{ m.year }}){% endif %}">
+                {% if u.poster_url %}
+                  <img src="{{ u.poster_url }}" alt="" loading="lazy" class="poster-zoom" data-title="{{ u.title }}{% if u.year %} ({{ u.year }}){% endif %}">
                 {% else %}<div class="album-poster-empty">Sin imagen</div>{% endif %}
+                <span class="owned-badge">✓ Ya la tienes</span>
               </div>
-              <strong>{{ m.title }}</strong>
-              <small>{{ m.year or "" }} · {{ m.collection }}</small>
-              <button type="button" class="btn btn-secondary copy-btn" data-copy="{{ m.title }}{% if m.year %} {{ m.year }}{% endif %}">📋 Copiar nombre</button>
+              <strong>{{ u.title }}</strong>
+              <small>{{ u.year or "" }}{% if u.quality %} · {{ u.quality }}{% endif %}{% if u.langs %} · {{ u.langs }}{% endif %}</small>
+              <div class="upgrade-pills">
+                {% for tag in u.reason_tags or [u.reasons] %}
+                  <span class="upgrade-pill">{{ tag }}</span>
+                {% endfor %}
+              </div>
+              <button type="button" class="btn btn-secondary copy-btn" data-copy="{{ u.title }}{% if u.year %} {{ u.year }}{% endif %} 1080p Latino">📋 Copiar para buscar</button>
+              {% if u.path %}
+                <a class="fix-link" href="/catalog/fix?path={{ u.path|urlencode }}&media_type=movie">✏️ Cambiar etiqueta</a>
+              {% endif %}
             </article>
           {% endfor %}
         </div>
@@ -107,9 +136,9 @@
     {% endif %}
 
     {% if missing.upcoming %}
-      <section class="album-section">
+      <section class="album-section" data-missing-section="upcoming">
         <div class="album-section-head">
-          <h2>Aún no se estrenan</h2>
+          <h2>🗓️ Aún no se estrenan</h2>
           <span>{{ missing.total_upcoming }} — no se pueden conseguir todavía</span>
         </div>
         <div class="album-movie-grid">
@@ -138,6 +167,51 @@
   </div>
 
   <style>
+    .missing-filters {
+      display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 4px;
+    }
+    .missing-filter-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 7px 13px; border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.04); color: var(--text, #e6edf3);
+      font-size: 0.86rem; font-weight: 600; cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .missing-filter-btn:hover { background: rgba(255,255,255,0.1); }
+    .missing-filter-btn.active {
+      background: #e50914; border-color: #e50914; color: #fff;
+    }
+    .missing-filter-btn.mf-upgrade.active {
+      background: #238636; border-color: #2ea043; color: #fff;
+    }
+    .mf-count {
+      background: rgba(0,0,0,0.28); padding: 1px 7px;
+      border-radius: 999px; font-size: 0.76rem; font-weight: 700;
+    }
+    .upgrade-explainer {
+      margin: 0 0 14px; padding: 10px 14px; border-radius: 10px;
+      background: rgba(46, 160, 67, 0.12);
+      border: 1px solid rgba(63, 185, 80, 0.35);
+      color: #d8f5df; font-size: 0.88rem; line-height: 1.45;
+    }
+    .owned-badge {
+      position: absolute; top: 6px; left: 6px;
+      background: rgba(24, 128, 56, 0.92); color: #fff;
+      font-size: 0.7rem; font-weight: 800; letter-spacing: 0.01em;
+      padding: 3px 7px; border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.55);
+      pointer-events: none;
+    }
+    .upgrade-pills {
+      display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 6px;
+    }
+    .upgrade-pill {
+      display: inline-block; padding: 2px 7px; border-radius: 6px;
+      background: rgba(210, 153, 34, 0.18);
+      border: 1px solid rgba(210, 153, 34, 0.45);
+      color: #f0c05a; font-size: 0.74rem; font-weight: 700;
+    }
     .missing-show-list { display: flex; flex-direction: column; gap: 12px; }
     .missing-show { display: flex; gap: 14px; padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.03); }
     .missing-show-poster { width: 72px; flex: 0 0 72px; }
@@ -160,8 +234,19 @@
   </style>
 
   <script>
-    // Póster grande: usa la imagen en mejor calidad de TMDB (w780 en vez de w342)
+    // Filtros rápidos de sección (Todas / Pelis que faltan / Episodios / Ya las tienes / Próximos)
     document.addEventListener("click", function (ev) {
+      var fbtn = ev.target.closest("[data-missing-filter]");
+      if (fbtn) {
+        var target = fbtn.dataset.missingFilter;
+        document.querySelectorAll("[data-missing-filter]").forEach(function (b) {
+          b.classList.toggle("active", b === fbtn);
+        });
+        document.querySelectorAll("[data-missing-section]").forEach(function (sec) {
+          sec.hidden = (target !== "all" && sec.dataset.missingSection !== target);
+        });
+        return;
+      }
       var img = ev.target.closest(".poster-zoom");
       if (img) {
         var modal = document.getElementById("posterModal");
@@ -179,8 +264,9 @@
     // Copiar al portapapeles compatible con http:// (la API moderna solo
     // funciona con candado/https, y la app corre en la red local sin él).
     function copyText(text, btn) {
+      var original = btn.dataset.origLabel || btn.textContent;
+      btn.dataset.origLabel = original;
       function done(ok) {
-        var original = "📋 Copiar nombre";
         btn.textContent = ok ? "✅ Copiado" : "❌ No se pudo";
         btn.classList.add("copied");
         setTimeout(function () { btn.textContent = original; btn.classList.remove("copied"); }, 1600);
