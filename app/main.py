@@ -2128,7 +2128,7 @@ def _comp_redirect(view="heaviest", q="", kind="", root="", min_mb="", msg=""):
 @app.get("/comparador", response_class=HTMLResponse)
 def comparator_view(
     request: Request,
-    view: str = "heaviest",
+    view: str = "identical",
     q: str = "",
     kind: str = "",
     root: str = "",
@@ -2136,8 +2136,8 @@ def comparator_view(
     msg: str = "",
 ):
     comparator.init_db()
-    if view not in ("heaviest", "identical", "same_name", "trash"):
-        view = "heaviest"
+    if view not in ("heaviest", "identical", "same_name", "folders", "trash"):
+        view = "identical"
     try:
         min_mb_val = float(min_mb) if str(min_mb).strip() else 0.0
     except ValueError:
@@ -2146,6 +2146,7 @@ def comparator_view(
     heaviest = comparator.list_heaviest(q=q, kind=kind, root=root, min_mb=min_mb_val) if view == "heaviest" else []
     identical_groups = comparator.list_identical_groups(q=q, kind=kind, root=root, min_mb=min_mb_val) if view == "identical" else []
     same_name_groups = comparator.list_same_name_groups(q=q, kind=kind, root=root, min_mb=min_mb_val) if view == "same_name" else []
+    folder_usage = comparator.list_folder_usage() if view == "folders" else []
     trashed = comparator.list_trashed() if view == "trash" else []
 
     return templates.TemplateResponse(request, "comparator.html", {
@@ -2156,8 +2157,10 @@ def comparator_view(
         "tab_counts": db.pending_counts(),
         **_base_context(),
         "comp_state": comparator.status(),
+        "clean_state": comparator.clean_status(),
         "stats": comparator.summary_stats(),
         "roots": comparator.list_roots(),
+        "top_shares": comparator.list_top_shares(),
         "allowed_base": comparator.allowed_base(),
         "trash_dir": comparator.trash_dir(),
         "view": view,
@@ -2169,6 +2172,7 @@ def comparator_view(
         "heaviest": heaviest,
         "identical_groups": identical_groups,
         "same_name_groups": same_name_groups,
+        "folder_usage": folder_usage,
         "trashed": trashed,
     })
 
@@ -2178,14 +2182,83 @@ def comparator_scan(
     folder: str = Form(""),
     scan_all: str = Form(""),
     only_media: str = Form("1"),
-    view: str = Form("heaviest"),
+    min_scan_mb: str = Form("50"),
+    view: str = Form("identical"),
 ):
     ok, message = comparator.start_scan(
         folder=folder,
         scan_all=(scan_all == "1"),
         only_media=(only_media != "0"),
+        min_scan_mb=min_scan_mb,
     )
     return _comp_redirect(view=view, msg="" if ok else message)
+
+
+@app.post("/comparador/identical/clean-group")
+def comparator_clean_group(
+    keep_id: int = Form(...),
+    fast_hash: str = Form(...),
+    size_bytes: int = Form(...),
+    q: str = Form(""),
+    kind: str = Form(""),
+    root: str = Form(""),
+    min_mb: str = Form(""),
+):
+    _, message = comparator.clean_identical_group(keep_id, fast_hash, size_bytes)
+    return _comp_redirect(view="identical", q=q, kind=kind, root=root, min_mb=min_mb, msg=message)
+
+
+@app.post("/comparador/identical/clean-all")
+def comparator_clean_all():
+    _, message = comparator.start_clean_all_identical()
+    return _comp_redirect(view="identical", msg=message)
+
+
+@app.post("/comparador/identical/clean-stop")
+def comparator_clean_stop():
+    _, message = comparator.stop_clean_all()
+    return _comp_redirect(view="identical", msg=message)
+
+
+@app.get("/api/comparador/clean-status")
+def api_comparator_clean_status():
+    return comparator.clean_status()
+
+
+@app.post("/comparador/same-name/keep")
+def comparator_same_name_keep(
+    keep_id: int = Form(...),
+    norm_name: str = Form(...),
+    q: str = Form(""),
+    kind: str = Form(""),
+    root: str = Form(""),
+    min_mb: str = Form(""),
+):
+    _, message = comparator.keep_one_in_same_name_group(keep_id, norm_name)
+    return _comp_redirect(view="same_name", q=q, kind=kind, root=root, min_mb=min_mb, msg=message)
+
+
+@app.post("/comparador/same-name/ignore")
+def comparator_same_name_ignore(
+    norm_name: str = Form(...),
+    q: str = Form(""),
+    kind: str = Form(""),
+    root: str = Form(""),
+    min_mb: str = Form(""),
+):
+    _, message = comparator.ignore_same_name_group(norm_name)
+    return _comp_redirect(view="same_name", q=q, kind=kind, root=root, min_mb=min_mb, msg=message)
+
+
+@app.post("/comparador/trash/empty")
+def comparator_empty_trash():
+    _, message = comparator.empty_trash()
+    return _comp_redirect(view="trash", msg=message)
+
+
+@app.get("/api/comparador/anon-summary")
+def api_comparator_anon_summary():
+    return {"text": comparator.anonymous_summary()}
 
 
 @app.post("/comparador/clear")

@@ -3,31 +3,47 @@
   <div class="album-page comp-page">
     <section class="album-hero">
       <div class="album-title">
-        <span class="album-kicker">Limpieza y comparación local</span>
-        <h1>🔍 Comparador de archivos</h1>
-        <p>Escanea solo las carpetas que quieras (o todo el NAS). Todo queda registrado: no vuelve a escanear lo que no cambió. Reproduce, compara lado a lado, ubica y borra desde aquí.</p>
+        <span class="album-kicker">Limpieza segura y 100% privada en tu NAS</span>
+        <h1>🔍 Comparador y Optimizador de espacio</h1>
+        <p>Escanea tus carpetas con filtro de peso para encontrar rápido lo que ocupa espacio. Los duplicados exactos se verifican con <strong>SHA-256 completo</strong> y <strong>nada se borra definitivo</strong>: todo pasa primero a Papelera registrando exactamente qué copia quedó viva y dónde está.</p>
       </div>
 
       <div class="comp-scan-controls">
         <form method="post" action="/comparador/scan" class="comp-scan-form">
           <input type="hidden" name="view" value="{{ view }}">
           <input type="hidden" name="only_media" value="1" id="compOnlyMediaHidden1">
+          <input type="hidden" name="min_scan_mb" value="50" id="compMinScanHidden1">
           <div class="comp-path-row">
             <input id="compFolderInput" class="album-path" name="folder" value="{{ root or '' }}" placeholder="Carpeta en {{ allowed_base }} (ej. {{ allowed_base }}/video)">
             <button type="button" class="btn btn-secondary" onclick="openCompFolderPicker()">📂 Elegir</button>
             <button type="submit" class="btn btn-primary" {% if comp_state.running %}disabled{% endif %}>🔍 Escanear carpeta</button>
           </div>
         </form>
-        <form method="post" action="/comparador/scan" class="comp-scan-all-form" onsubmit="return confirm('¿Escanear todo {{ allowed_base }}?\n\nIgnora carpetas internas del NAS (@* / #*) y puedes pausar o detener en cualquier momento guardando el avance.');">
+
+        <form method="post" action="/comparador/scan" class="comp-scan-all-form" onsubmit="return confirm('¿Escanear todo {{ allowed_base }}?\n\nIgnora carpetas internas del NAS (@* / #*) y guarda el avance automáticamente. Puedes pausar o detener en cualquier momento.');">
           <input type="hidden" name="view" value="{{ view }}">
           <input type="hidden" name="scan_all" value="1">
           <input type="hidden" name="only_media" value="1" id="compOnlyMediaHidden2">
+          <input type="hidden" name="min_scan_mb" value="50" id="compMinScanHidden2">
           <button type="submit" class="btn btn-secondary" {% if comp_state.running %}disabled{% endif %}>🌐 Escanear todo ({{ allowed_base }})</button>
         </form>
+
+        <select id="compMinScanSelect" class="comp-select" onchange="syncMinScan(this.value)" title="Ignora archivos pequeños para encontrar mucho más rápido lo que realmente ocupa espacio">
+          <option value="50" selected>⚡ ≥ 50 MB (rápido, recomendado)</option>
+          <option value="100">🚀 ≥ 100 MB (solo grandes)</option>
+          <option value="10">📦 ≥ 10 MB</option>
+          <option value="0">🐢 Todos los tamaños (0 MB)</option>
+        </select>
+
         <label class="comp-media-toggle" title="Desmarca solo si también quieres incluir documentos, ZIPs u otros archivos no multimedia">
           <input type="checkbox" id="compOnlyMediaCheck" checked onchange="syncOnlyMedia(this.checked)">
-          <span>🎬 Solo audiovisuales (video, audio, fotos)</span>
+          <span>🎬 Solo audiovisuales</span>
         </label>
+
+        {% if stats.total_files %}
+          <button type="button" class="btn btn-ghost btn-sm" onclick="copyAnonSummary(this)" title="Copia solo números (GB y conteos), SIN nombres de archivos ni carpetas reales">📋 Resumen anónimo</button>
+        {% endif %}
+
         {% if stats.total_files and not comp_state.running %}
           <form method="post" action="/comparador/clear" onsubmit="return confirm('¿Vaciar el registro del comparador para empezar limpio?\n\nNO borra ningún archivo de tu NAS.');">
             <input type="hidden" name="view" value="{{ view }}">
@@ -35,6 +51,15 @@
           </form>
         {% endif %}
       </div>
+
+      {% if top_shares %}
+        <div class="comp-shares-bar">
+          <span class="comp-shares-label">Acceso rápido:</span>
+          {% for s in top_shares %}
+            <button type="button" class="btn btn-ghost btn-sm" onclick="pickShare({{ s.path|tojson }})">📁 {{ s.name }}</button>
+          {% endfor %}
+        </div>
+      {% endif %}
     </section>
 
     {% if msg %}
@@ -44,7 +69,7 @@
       </div>
     {% endif %}
 
-    {# ---- Banner en vivo con indicador visual animado + Pausar / Reanudar / Detener ---- #}
+    {# ---- Banner en vivo del escaneo ---- #}
     <div id="compLiveBanner" class="comp-live-card {{ 'is-paused' if comp_state.paused else ('is-running' if comp_state.running else ('is-done' if comp_state.visible else 'hidden')) }}">
       <div class="comp-banner-head">
         <div class="comp-banner-status">
@@ -73,7 +98,7 @@
             <input type="hidden" name="view" value="{{ view }}">
             <button type="submit" class="btn btn-danger btn-sm">⏹️ Detener y guardar</button>
           </form>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="location.reload()" title="Refresca la lista de abajo con lo que ya encontró">🔄 Ver avance</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="location.reload()">🔄 Ver avance</button>
         </div>
       </div>
 
@@ -91,12 +116,37 @@
       <small id="compCurrent" class="comp-current-path">{{ comp_state.current }}</small>
     </div>
 
+    {# ---- Banner en vivo de limpieza segura en lote (SHA-256 -> Papelera) ---- #}
+    <div id="compCleanBanner" class="comp-live-card {{ 'is-running' if clean_state.running else ('is-done' if clean_state.visible else 'hidden') }}">
+      <div class="comp-banner-head">
+        <div class="comp-banner-status">
+          <span id="cleanDot" class="comp-live-dot {{ 'active' if clean_state.running else 'done' }}"></span>
+          <div>
+            <strong id="cleanTitle">{% if clean_state.running %}🛡️ Verificando SHA-256 completo y moviendo copias a Papelera...{% else %}✅ Limpieza segura finalizada{% endif %}</strong>
+            <div id="cleanMsg" class="comp-banner-msg">{{ clean_state.message }}</div>
+          </div>
+        </div>
+        {% if clean_state.running %}
+          <form method="post" action="/comparador/identical/clean-stop">
+            <button type="submit" class="btn btn-danger btn-sm">⏹️ Detener</button>
+          </form>
+        {% endif %}
+      </div>
+      <div id="cleanCounters" class="comp-live-counters {% if not clean_state.running %}hidden{% endif %}">
+        <span>Grupos: <strong id="clDone">{{ clean_state.groups_done or 0 }}</strong>/<span id="clTotal">{{ clean_state.groups_total or 0 }}</span></span>
+        <span>Movidos a papelera: <strong id="clMoved">{{ clean_state.moved_count or 0 }}</strong> (<span id="clBytes">{{ clean_state.moved_text }}</span>)</span>
+        <span>Omitidos por seguridad: <strong id="clSkipped">{{ clean_state.skipped_count or 0 }}</strong></span>
+      </div>
+      <progress id="cleanProgress" class="dedup-progress {% if not (clean_state.running and clean_state.groups_total) %}hidden{% endif %}" value="{{ clean_state.groups_done or 0 }}" max="{{ clean_state.groups_total or 1 }}"></progress>
+      <small id="cleanCurrent" class="comp-current-path">{{ clean_state.current }}</small>
+    </div>
+
     {# ---- Resumen numérico ---- #}
     <section class="album-stats" aria-label="Resumen del comparador">
       <div><strong>{{ stats.total_files }}</strong><span>archivos registrados</span></div>
       <div><strong>{{ stats.total_text }}</strong><span>espacio registrado</span></div>
       <div><strong>{{ stats.identical_groups }}</strong><span>grupos idénticos ({{ stats.reclaimable_text }} ahorrables)</span></div>
-      <div><strong>{{ stats.same_name_groups }}</strong><span>grupos mismo nombre</span></div>
+      <div><strong>{{ stats.same_name_groups }}</strong><span>similares por decidir</span></div>
       <div><strong>{{ stats.trashed_count }}</strong><span>en papelera ({{ stats.trashed_text }})</span></div>
     </section>
 
@@ -116,6 +166,7 @@
                 <form method="post" action="/comparador/scan">
                   <input type="hidden" name="view" value="{{ view }}">
                   <input type="hidden" name="folder" value="{{ r.root_path }}">
+                  <input type="hidden" name="min_scan_mb" value="50">
                   <button type="submit" class="btn btn-secondary btn-sm" {% if comp_state.running %}disabled{% endif %} title="Revisa solo archivos nuevos o cambiados">🔄 Actualizar</button>
                 </form>
                 <form method="post" action="/comparador/root/forget" onsubmit="return confirm('¿Quitar {{ r.root_path }} del registro del comparador?\n\nTus archivos en el NAS NO se borran.');">
@@ -132,14 +183,15 @@
 
     {# ---- Subpestañas ---- #}
     <div class="catalog-subtabs">
-      <a class="catalog-subtab {{ 'active' if view == 'heaviest' else '' }}" href="/comparador?view=heaviest&q={{ q|urlencode }}&kind={{ kind|urlencode }}&root={{ root|urlencode }}&min_mb={{ min_mb|urlencode }}">📦 Más pesados</a>
       <a class="catalog-subtab {{ 'active' if view == 'identical' else '' }}" href="/comparador?view=identical&q={{ q|urlencode }}&kind={{ kind|urlencode }}&root={{ root|urlencode }}&min_mb={{ min_mb|urlencode }}">👯 Idénticos ({{ stats.identical_groups }})</a>
-      <a class="catalog-subtab {{ 'active' if view == 'same_name' else '' }}" href="/comparador?view=same_name&q={{ q|urlencode }}&kind={{ kind|urlencode }}&root={{ root|urlencode }}&min_mb={{ min_mb|urlencode }}">📝 Mismo nombre ({{ stats.same_name_groups }})</a>
+      <a class="catalog-subtab {{ 'active' if view == 'same_name' else '' }}" href="/comparador?view=same_name&q={{ q|urlencode }}&kind={{ kind|urlencode }}&root={{ root|urlencode }}&min_mb={{ min_mb|urlencode }}">⚖️ Decidir similares ({{ stats.same_name_groups }})</a>
+      <a class="catalog-subtab {{ 'active' if view == 'folders' else '' }}" href="/comparador?view=folders">📊 Por carpeta</a>
+      <a class="catalog-subtab {{ 'active' if view == 'heaviest' else '' }}" href="/comparador?view=heaviest&q={{ q|urlencode }}&kind={{ kind|urlencode }}&root={{ root|urlencode }}&min_mb={{ min_mb|urlencode }}">📦 Más pesados</a>
       <a class="catalog-subtab {{ 'active' if view == 'trash' else '' }}" href="/comparador?view=trash">🗂️ Papelera ({{ stats.trashed_count }})</a>
     </div>
 
     {# ---- Filtros ---- #}
-    {% if view != 'trash' %}
+    {% if view in ('heaviest', 'identical', 'same_name') %}
       <form method="get" action="/comparador" class="comp-filter-bar">
         <input type="hidden" name="view" value="{{ view }}">
         <input type="search" name="q" value="{{ q }}" placeholder="Buscar por nombre o ruta..." class="comp-search-input">
@@ -178,8 +230,169 @@
       </div>
     </div>
 
-    {# ---- VISTA 1: MÁS PESADOS ---- #}
-    {% if view == 'heaviest' %}
+    {# ---- VISTA 1: IDÉNTICOS (DOBLE CANDADO SHA-256 -> PAPELERA) ---- #}
+    {% if view == 'identical' %}
+      {% if identical_groups %}
+        <div class="comp-safety-bar">
+          <div>
+            <strong>🛡️ Limpieza segura de duplicados exactos</strong>
+            <p>Se verifica el <strong>SHA-256 completo byte a byte</strong> y que la copia conservada siga legible. <strong>Nada se borra definitivo:</strong> las copias sobrantes se mueven a la Papelera junto con la ruta exacta de la copia que se quedó viva.</p>
+          </div>
+          <form method="post" action="/comparador/identical/clean-all" onsubmit="return confirm('🛡️ LIMPIEZA SEGURA EN LOTE\n\nSe verificará SHA-256 completo de los {{ stats.identical_groups }} grupo(s) y se moverán las copias sobrantes a la Papelera ({{ stats.reclaimable_text }} ahorrables).\n\n• NADA se borra definitivo.\n• En cada grupo se conserva la copia marcada con ✅ SE CONSERVA.\n• En Papelera quedará registrada la ruta exacta de cada copia conservada.\n\n¿Iniciar?');">
+            <button type="submit" class="btn btn-primary" {% if comp_state.running or clean_state.running %}disabled{% endif %}>🛡️ Limpiar todos a Papelera ({{ stats.reclaimable_text }})</button>
+          </form>
+        </div>
+
+        <div class="comp-groups">
+          {% for g in identical_groups %}
+            <section class="comp-group-card">
+              <form method="post" action="/comparador/identical/clean-group" onsubmit="return confirm('Se verificará SHA-256 completo de este grupo.\n\n• Se CONSERVA únicamente la copia que marcaste.\n• Las demás copias se mueven a la Papelera (recuperables en cualquier momento).\n\n¿Continuar?');">
+                <input type="hidden" name="fast_hash" value="{{ g.key }}">
+                <input type="hidden" name="size_bytes" value="{{ g.size_bytes }}">
+                <input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="root" value="{{ root }}"><input type="hidden" name="min_mb" value="{{ min_mb }}">
+
+                <div class="comp-group-head">
+                  <div>
+                    <h3>👯 {{ g.label }}</h3>
+                    <small>{{ g.count }} copias idénticas · {{ g.size_text }} c/u · <strong>{{ g.reclaimable_text }} ahorrables</strong></small>
+                  </div>
+                  <div class="comp-group-actions">
+                    {% if g.files|length >= 2 %}
+                      <button type="button" class="btn btn-secondary btn-sm" onclick="openCompareModal({{ g.files[0].id }}, {{ g.files[1].id }})">⚖️ Ver lado a lado</button>
+                    {% endif %}
+                    <button type="submit" class="btn btn-primary btn-sm">🛡️ Conservar elegida y mover sobrantes a Papelera</button>
+                  </div>
+                </div>
+
+                <div class="comp-list">
+                  {% for f in g.files %}
+                    <label class="comp-row comp-keep-option {{ 'is-keeper' if f.recommended_keep else '' }}" data-file-id="{{ f.id }}">
+                      <div class="comp-keep-radio">
+                        <input type="radio" name="keep_id" value="{{ f.id }}" {{ 'checked' if f.recommended_keep else '' }} onchange="highlightKeeper(this)">
+                      </div>
+                      <div class="comp-row-main">
+                        <div class="comp-row-top">
+                          <span class="comp-keep-badge {{ '' if f.recommended_keep else 'is-dup' }}">
+                            {% if f.recommended_keep %}✅ SE CONSERVA{% else %}🗂️ A PAPELERA{% endif %}
+                          </span>
+                          <strong>{{ f.filename }}</strong>
+                          <span class="album-chip">{{ f.size_text }}</span>
+                        </div>
+                        <div class="comp-path">📍 {{ f.path }}</div>
+                        <small class="comp-meta">Modificado: {{ f.mtime_text }}</small>
+                      </div>
+                      <div class="comp-row-actions">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="event.preventDefault(); openPreviewSingle({{ f.id }})">▶️ Ver</button>
+                        <button type="button" class="btn btn-ghost btn-sm" onclick="event.preventDefault(); copyText({{ f.path|tojson }}, this)">📋</button>
+                      </div>
+                    </label>
+                  {% endfor %}
+                </div>
+              </form>
+            </section>
+          {% endfor %}
+        </div>
+      {% else %}
+        <section class="album-empty">
+          <h2>{% if stats.total_files %}No se encontraron duplicados idénticos{% else %}Sin archivos registrados aún{% endif %}</h2>
+          <p>{% if stats.total_files %}No hay copias con el mismo tamaño y contenido con los filtros actuales.{% else %}Elige una carpeta arriba (por ejemplo <code>video</code>) o pulsa <strong>Escanear todo</strong> para empezar.{% endif %}</p>
+        </section>
+      {% endif %}
+
+    {# ---- VISTA 2: DECIDIR SIMILARES (MISMO NOMBRE / DISTINTA CALIDAD O PESO) ---- #}
+    {% elif view == 'same_name' %}
+      {% if same_name_groups %}
+        <div class="comp-safety-bar">
+          <div>
+            <strong>⚖️ Aquí decides tú (versiones similares o distinta calidad)</strong>
+            <p>El sistema nunca borra estos archivos solo porque pueden tener distinta calidad, idioma o edición. Compáralos lado a lado, elige cuál conservar (las demás pasan a Papelera guardando la ruta de la que dejaste) o pulsa <strong>Conservar todos</strong>.</p>
+          </div>
+        </div>
+        <div class="comp-groups">
+          {% for g in same_name_groups %}
+            <section class="comp-group-card">
+              <div class="comp-group-head">
+                <div>
+                  <h3>⚖️ {{ g.label }}</h3>
+                  <small>{{ g.count }} archivo(s) parecidos · Total: {{ g.total_text }}</small>
+                </div>
+                <div class="comp-group-actions">
+                  {% if g.files|length >= 2 %}
+                    <button type="button" class="btn btn-primary btn-sm" onclick="openCompareModal({{ g.files[0].id }}, {{ g.files[1].id }})">⚖️ Comparar lado a lado</button>
+                  {% endif %}
+                  <form method="post" action="/comparador/same-name/ignore" style="margin:0;">
+                    <input type="hidden" name="norm_name" value="{{ g.key }}">
+                    <input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="root" value="{{ root }}"><input type="hidden" name="min_mb" value="{{ min_mb }}">
+                    <button type="submit" class="btn btn-ghost btn-sm" title="Dejar todos como están y ocultar este grupo">🤝 Conservar todos (No preguntar más)</button>
+                  </form>
+                </div>
+              </div>
+              <div class="comp-list">
+                {% for f in g.files %}
+                  <div class="comp-row" data-file-id="{{ f.id }}">
+                    <div class="comp-row-main">
+                      <div class="comp-row-top">
+                        <strong>{{ f.filename }}</strong>
+                        <span class="album-chip">{{ f.size_text }}</span>
+                        {% if f.media_text %}<span class="album-chip ok">{{ f.media_text }}</span>{% endif %}
+                      </div>
+                      <div class="comp-path">📍 {{ f.path }}</div>
+                      <small class="comp-meta">Modificado: {{ f.mtime_text }}</small>
+                    </div>
+                    <div class="comp-row-actions">
+                      <button type="button" class="btn btn-secondary btn-sm" onclick="openPreviewSingle({{ f.id }})">▶️ Ver</button>
+                      <button type="button" class="btn btn-ghost btn-sm" onclick="selectForCompare({{ f.id }}, {{ f.filename|tojson }})">⚖️ A/B</button>
+                      <form method="post" action="/comparador/same-name/keep" onsubmit="return confirm('¿CONSERVAR este archivo y mover las otras {{ g.count - 1 }} versión(es) a la Papelera?\n\n✅ SE CONSERVA:\n{{ f.path }}\n\nLas demás irán a Papelera (recuperables en cualquier momento).');">
+                        <input type="hidden" name="keep_id" value="{{ f.id }}">
+                        <input type="hidden" name="norm_name" value="{{ g.key }}">
+                        <input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="root" value="{{ root }}"><input type="hidden" name="min_mb" value="{{ min_mb }}">
+                        <button type="submit" class="btn btn-primary btn-sm">✅ Conservar esta</button>
+                      </form>
+                    </div>
+                  </div>
+                {% endfor %}
+              </div>
+            </section>
+          {% endfor %}
+        </div>
+      {% else %}
+        <section class="album-empty">
+          <h2>Sin archivos similares pendientes por decidir</h2>
+          <p>No hay grupos con nombre parecido pendientes con los filtros actuales.</p>
+        </section>
+      {% endif %}
+
+    {# ---- VISTA 3: MAPA DE ESPACIO POR CARPETA ---- #}
+    {% elif view == 'folders' %}
+      {% if folder_usage %}
+        <div class="comp-list">
+          {% for f in folder_usage %}
+            <div class="comp-row">
+              <div class="comp-row-main">
+                <div class="comp-row-top">
+                  <strong>📁 {{ f.path }}</strong>
+                  <span class="album-chip">{{ f.size_text }}</span>
+                  <span class="album-chip ok">{{ f.pct }}%</span>
+                  <small class="comp-meta">{{ f.count }} archivo(s)</small>
+                </div>
+                <div class="comp-space-bar"><div class="comp-space-fill" style="width: {{ f.pct }}%;"></div></div>
+              </div>
+              <div class="comp-row-actions">
+                <a class="btn btn-secondary btn-sm" href="/comparador?view=heaviest&root={{ f.path|urlencode }}">📦 Ver pesados</a>
+                <a class="btn btn-ghost btn-sm" href="/comparador?view=identical&root={{ f.path|urlencode }}">👯 Duplicados</a>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <section class="album-empty">
+          <h2>Sin datos de carpetas aún</h2>
+          <p>Escanea al menos una carpeta arriba para ver qué carpetas ocupan más espacio en tu NAS.</p>
+        </section>
+      {% endif %}
+
+    {# ---- VISTA 4: MÁS PESADOS ---- #}
+    {% elif view == 'heaviest' %}
       {% if heaviest %}
         <div class="comp-list">
           {% for f in heaviest %}
@@ -221,118 +434,20 @@
         </section>
       {% endif %}
 
-    {# ---- VISTA 2: IDÉNTICOS ---- #}
-    {% elif view == 'identical' %}
-      {% if identical_groups %}
-        <div class="comp-groups">
-          {% for g in identical_groups %}
-            <section class="comp-group-card">
-              <div class="comp-group-head">
-                <div>
-                  <h3>👯 {{ g.label }}</h3>
-                  <small>{{ g.count }} copias idénticas · {{ g.size_text }} c/u · <strong>{{ g.reclaimable_text }} ahorrables</strong></small>
-                </div>
-                {% if g.files|length >= 2 %}
-                  <button type="button" class="btn btn-primary btn-sm" onclick="openCompareModal({{ g.files[0].id }}, {{ g.files[1].id }})">⚖️ Comparar lado a lado</button>
-                {% endif %}
-              </div>
-              <div class="comp-list">
-                {% for f in g.files %}
-                  <div class="comp-row" data-file-id="{{ f.id }}">
-                    <div class="comp-row-main">
-                      <div class="comp-row-top">
-                        <strong>{{ f.filename }}</strong>
-                        <span class="album-chip">{{ f.size_text }}</span>
-                      </div>
-                      <div class="comp-path">📍 {{ f.path }}</div>
-                      <small class="comp-meta">Modificado: {{ f.mtime_text }}</small>
-                    </div>
-                    <div class="comp-row-actions">
-                      <button type="button" class="btn btn-secondary btn-sm" onclick="openPreviewSingle({{ f.id }})">▶️ Ver</button>
-                      <button type="button" class="btn btn-ghost btn-sm" onclick="selectForCompare({{ f.id }}, {{ f.filename|tojson }})">⚖️ A/B</button>
-                      <button type="button" class="btn btn-ghost btn-sm" onclick="copyText({{ f.path|tojson }}, this)">📋</button>
-                      <form method="post" action="/comparador/trash" onsubmit="return confirm('¿Mover esta copia a la papelera?\n\n{{ f.path }}');">
-                        <input type="hidden" name="file_id" value="{{ f.id }}">
-                        <input type="hidden" name="view" value="{{ view }}"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="root" value="{{ root }}"><input type="hidden" name="min_mb" value="{{ min_mb }}">
-                        <button type="submit" class="btn btn-secondary btn-sm" title="Mover a papelera">🗂️</button>
-                      </form>
-                      <form method="post" action="/comparador/delete" onsubmit="return confirm('⚠️ BORRADO DEFINITIVO\n\n{{ f.path }}\nTamaño: {{ f.size_text }}\n\n¿Seguro?');">
-                        <input type="hidden" name="file_id" value="{{ f.id }}">
-                        <input type="hidden" name="view" value="{{ view }}"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="root" value="{{ root }}"><input type="hidden" name="min_mb" value="{{ min_mb }}">
-                        <button type="submit" class="btn btn-danger btn-sm" title="Borrar definitivamente">🗑️</button>
-                      </form>
-                    </div>
-                  </div>
-                {% endfor %}
-              </div>
-            </section>
-          {% endfor %}
-        </div>
-      {% else %}
-        <section class="album-empty">
-          <h2>No se encontraron duplicados idénticos</h2>
-          <p>Escanea más carpetas o ajusta los filtros para buscar copias con el mismo tamaño y contenido.</p>
-        </section>
-      {% endif %}
-
-    {# ---- VISTA 3: MISMO NOMBRE ---- #}
-    {% elif view == 'same_name' %}
-      {% if same_name_groups %}
-        <div class="comp-groups">
-          {% for g in same_name_groups %}
-            <section class="comp-group-card">
-              <div class="comp-group-head">
-                <div>
-                  <h3>📝 {{ g.label }}</h3>
-                  <small>{{ g.count }} archivo(s) con nombre parecido · Total: {{ g.total_text }}</small>
-                </div>
-                {% if g.files|length >= 2 %}
-                  <button type="button" class="btn btn-primary btn-sm" onclick="openCompareModal({{ g.files[0].id }}, {{ g.files[1].id }})">⚖️ Comparar lado a lado</button>
-                {% endif %}
-              </div>
-              <div class="comp-list">
-                {% for f in g.files %}
-                  <div class="comp-row" data-file-id="{{ f.id }}">
-                    <div class="comp-row-main">
-                      <div class="comp-row-top">
-                        <strong>{{ f.filename }}</strong>
-                        <span class="album-chip">{{ f.size_text }}</span>
-                        {% if f.media_text %}<span class="album-chip ok">{{ f.media_text }}</span>{% endif %}
-                      </div>
-                      <div class="comp-path">📍 {{ f.path }}</div>
-                      <small class="comp-meta">Modificado: {{ f.mtime_text }}</small>
-                    </div>
-                    <div class="comp-row-actions">
-                      <button type="button" class="btn btn-secondary btn-sm" onclick="openPreviewSingle({{ f.id }})">▶️ Ver</button>
-                      <button type="button" class="btn btn-ghost btn-sm" onclick="selectForCompare({{ f.id }}, {{ f.filename|tojson }})">⚖️ A/B</button>
-                      <button type="button" class="btn btn-ghost btn-sm" onclick="copyText({{ f.path|tojson }}, this)">📋</button>
-                      <form method="post" action="/comparador/trash" onsubmit="return confirm('¿Mover a la papelera?\n\n{{ f.path }}');">
-                        <input type="hidden" name="file_id" value="{{ f.id }}">
-                        <input type="hidden" name="view" value="{{ view }}"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="root" value="{{ root }}"><input type="hidden" name="min_mb" value="{{ min_mb }}">
-                        <button type="submit" class="btn btn-secondary btn-sm" title="Mover a papelera">🗂️</button>
-                      </form>
-                      <form method="post" action="/comparador/delete" onsubmit="return confirm('⚠️ BORRADO DEFINITIVO\n\n{{ f.path }}\nTamaño: {{ f.size_text }}\n\n¿Seguro?');">
-                        <input type="hidden" name="file_id" value="{{ f.id }}">
-                        <input type="hidden" name="view" value="{{ view }}"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="root" value="{{ root }}"><input type="hidden" name="min_mb" value="{{ min_mb }}">
-                        <button type="submit" class="btn btn-danger btn-sm" title="Borrar definitivamente">🗑️</button>
-                      </form>
-                    </div>
-                  </div>
-                {% endfor %}
-              </div>
-            </section>
-          {% endfor %}
-        </div>
-      {% else %}
-        <section class="album-empty">
-          <h2>Sin grupos con el mismo nombre</h2>
-          <p>No hay archivos repetidos por nombre con los filtros actuales.</p>
-        </section>
-      {% endif %}
-
-    {# ---- VISTA 4: PAPELERA ---- #}
+    {# ---- VISTA 5: PAPELERA (CON REGISTRO EXACTO DE LA COPIA CONSERVADA) ---- #}
     {% elif view == 'trash' %}
-      <p class="comp-trash-note">Carpeta de papelera en el NAS: <code>{{ trash_dir }}</code></p>
+      <div class="comp-safety-bar">
+        <div>
+          <strong>🗂️ Papelera segura ({{ stats.trashed_count }} archivo(s) · {{ stats.trashed_text }} listos para liberar)</strong>
+          <p>Carpeta en tu NAS: <code>{{ trash_dir }}</code>. Puedes restaurar cualquier archivo a su carpeta original o vaciar la papelera cuando estés seguro.</p>
+        </div>
+        {% if trashed %}
+          <form method="post" action="/comparador/trash/empty" onsubmit="return confirm('⚠️ VACIAR PAPELERA DEFINITIVAMENTE\n\nSe borrarán {{ stats.trashed_count }} archivo(s) y se liberarán {{ stats.trashed_text }} de tu NAS.\n\nLas copias conservadas en tus carpetas NO se tocan.\nEsta acción NO se puede deshacer. ¿Seguro?');">
+            <button type="submit" class="btn btn-danger">🗑️ Vaciar papelera (liberar {{ stats.trashed_text }})</button>
+          </form>
+        {% endif %}
+      </div>
+
       {% if trashed %}
         <div class="comp-list">
           {% for f in trashed %}
@@ -341,8 +456,15 @@
                 <div class="comp-row-top">
                   <strong>{{ f.filename }}</strong>
                   <span class="album-chip">{{ f.size_text }}</span>
+                  {% if f.trash_reason %}<span class="album-chip ok">{{ f.trash_reason }}</span>{% endif %}
                 </div>
-                <div class="comp-path">📍 Origen: {{ f.trashed_from or f.path }}</div>
+                <div class="comp-path">📍 Origen (de dónde se movió): {{ f.trashed_from or f.path }}</div>
+                {% if f.kept_copy_path %}
+                  <div class="comp-kept-box">
+                    <span>✅ <strong>Copia conservada en:</strong> <code>{{ f.kept_copy_path }}</code></span>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="copyText({{ f.kept_copy_path|tojson }}, this)">📋 Copiar ruta</button>
+                  </div>
+                {% endif %}
                 <small class="comp-meta">Movido a papelera: {{ f.trashed_at }}</small>
               </div>
               <div class="comp-row-actions">
@@ -354,7 +476,7 @@
                 <form method="post" action="/comparador/delete" onsubmit="return confirm('⚠️ BORRADO DEFINITIVO\n\n{{ f.path }}\n\nEsta acción NO se puede deshacer. ¿Seguro?');">
                   <input type="hidden" name="file_id" value="{{ f.id }}">
                   <input type="hidden" name="view" value="trash">
-                  <button type="submit" class="btn btn-danger btn-sm">🗑️ Borrar definitivo</button>
+                  <button type="submit" class="btn btn-danger btn-sm">🗑️ Borrar</button>
                 </form>
               </div>
             </div>
@@ -363,7 +485,7 @@
       {% else %}
         <section class="album-empty">
           <h2>La papelera está vacía</h2>
-          <p>Cuando muevas archivos a la papelera aparecerán aquí para restaurarlos o borrarlos definitivamente.</p>
+          <p>Cuando muevas duplicados o archivos a la papelera aparecerán aquí con la ruta de la copia conservada, listos para restaurar o liberar espacio.</p>
         </section>
       {% endif %}
     {% endif %}
@@ -403,7 +525,40 @@
       if (h2) h2.value = val;
     }
 
-    // ---- Sondeo en vivo del escaneo del comparador ----
+    function syncMinScan(val) {
+      var h1 = document.getElementById("compMinScanHidden1");
+      var h2 = document.getElementById("compMinScanHidden2");
+      if (h1) h1.value = val;
+      if (h2) h2.value = val;
+    }
+
+    function pickShare(path) {
+      var inp = document.getElementById("compFolderInput");
+      if (inp) { inp.value = path; inp.focus(); }
+    }
+
+    function highlightKeeper(radio) {
+      var form = radio.closest("form");
+      if (!form) return;
+      form.querySelectorAll(".comp-keep-option").forEach(function (row) {
+        var r = row.querySelector("input[type=radio]");
+        var badge = row.querySelector(".comp-keep-badge");
+        var isKeep = r && r.checked;
+        row.classList.toggle("is-keeper", !!isKeep);
+        if (badge) {
+          badge.classList.toggle("is-dup", !isKeep);
+          badge.textContent = isKeep ? "✅ SE CONSERVA" : "🗂️ A PAPELERA";
+        }
+      });
+    }
+
+    function copyAnonSummary(btn) {
+      fetch("/api/comparador/anon-summary", { cache: "no-store" })
+        .then(function (r) { return r.json(); })
+        .then(function (data) { copyText(data.text || "", btn); });
+    }
+
+    // ---- Sondeo en vivo del escaneo ----
     (function () {
       var running = {{ 'true' if comp_state.running else 'false' }};
       if (!running) return;
@@ -428,20 +583,10 @@
             if (cSeen) cSeen.textContent = st.seen || 0;
             if (cAdded) cAdded.textContent = st.added || 0;
             if (cSkipped) cSkipped.textContent = st.skipped || 0;
-            if (title) {
-              title.textContent = st.paused ? "⏸️ Escaneo en pausa" : (st.running ? "TRABAJANDO — Escaneando archivos..." : "✅ Terminado");
-            }
-            if (card) {
-              card.classList.toggle("is-paused", !!st.paused);
-              card.classList.toggle("is-running", !!st.running && !st.paused);
-            }
-            if (dot) {
-              dot.className = "comp-live-dot " + (st.paused ? "paused" : (st.running ? "active" : "done"));
-            }
-            if (pBtn && rBtn) {
-              pBtn.classList.toggle("hidden", !!st.paused);
-              rBtn.classList.toggle("hidden", !st.paused);
-            }
+            if (title) title.textContent = st.paused ? "⏸️ Escaneo en pausa" : (st.running ? "TRABAJANDO — Escaneando archivos..." : "✅ Terminado");
+            if (card) { card.classList.toggle("is-paused", !!st.paused); card.classList.toggle("is-running", !!st.running && !st.paused); }
+            if (dot) dot.className = "comp-live-dot " + (st.paused ? "paused" : (st.running ? "active" : "done"));
+            if (pBtn && rBtn) { pBtn.classList.toggle("hidden", !!st.paused); rBtn.classList.toggle("hidden", !st.paused); }
             if (st.hash_total) {
               var hw = document.getElementById("cHashWrap");
               if (hw) hw.classList.remove("hidden");
@@ -454,15 +599,44 @@
             } else if (indet) {
               indet.classList.toggle("hidden", !!st.paused || !st.running);
             }
-            if (!st.running) {
-              location.reload();
-              return;
-            }
+            if (!st.running) { location.reload(); return; }
             setTimeout(poll, 1200);
           })
           .catch(function () { setTimeout(poll, 3000); });
       }
       setTimeout(poll, 1000);
+    })();
+
+    // ---- Sondeo en vivo de limpieza segura en lote ----
+    (function () {
+      var running = {{ 'true' if clean_state.running else 'false' }};
+      if (!running) return;
+      function pollClean() {
+        fetch("/api/comparador/clean-status", { cache: "no-store" })
+          .then(function (r) { return r.json(); })
+          .then(function (st) {
+            var m = document.getElementById("cleanMsg");
+            var c = document.getElementById("cleanCurrent");
+            var d = document.getElementById("clDone");
+            var t = document.getElementById("clTotal");
+            var mv = document.getElementById("clMoved");
+            var by = document.getElementById("clBytes");
+            var sk = document.getElementById("clSkipped");
+            var p = document.getElementById("cleanProgress");
+            if (m) m.textContent = st.message || "";
+            if (c) c.textContent = st.current || "";
+            if (d) d.textContent = st.groups_done || 0;
+            if (t) t.textContent = st.groups_total || 0;
+            if (mv) mv.textContent = st.moved_count || 0;
+            if (by) by.textContent = st.moved_text || "0 B";
+            if (sk) sk.textContent = st.skipped_count || 0;
+            if (p && st.groups_total) { p.classList.remove("hidden"); p.max = st.groups_total; p.value = st.groups_done || 0; }
+            if (!st.running) { location.reload(); return; }
+            setTimeout(pollClean, 1200);
+          })
+          .catch(function () { setTimeout(pollClean, 3000); });
+      }
+      setTimeout(pollClean, 1000);
     })();
 
     // ---- Navegador de carpetas bajo /volume1 ----
@@ -519,31 +693,24 @@
       closeCompFolderPicker();
     }
 
-    // ---- Copiar ruta ----
     function copyText(text, btn) {
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(function () {
-          if (btn) { var old = btn.textContent; btn.textContent = "✅"; setTimeout(function () { btn.textContent = old; }, 1200); }
+          if (btn) { var old = btn.textContent; btn.textContent = "✅ Copiado"; setTimeout(function () { btn.textContent = old; }, 1400); }
         });
       } else {
-        prompt("Ruta del archivo:", text);
+        prompt("Copia este texto:", text);
       }
     }
 
     // ---- Selección A / B para comparar cualquier par ----
     var selA = null, selB = null;
     function selectForCompare(id, name) {
-      if (!selA || selA.id === id) {
-        selA = { id: id, name: name };
-      } else {
-        selB = { id: id, name: name };
-      }
+      if (!selA || selA.id === id) { selA = { id: id, name: name }; }
+      else { selB = { id: id, name: name }; }
       renderTray();
     }
-    function clearCompareSelection() {
-      selA = null; selB = null;
-      renderTray();
-    }
+    function clearCompareSelection() { selA = null; selB = null; renderTray(); }
     function renderTray() {
       var tray = document.getElementById("compTray");
       if (!selA && !selB) { tray.classList.add("hidden"); return; }
@@ -552,9 +719,7 @@
       document.getElementById("compTrayB").textContent = selB ? selB.name : "(elige otro archivo)";
       document.getElementById("compTrayOpenBtn").disabled = !(selA && selB);
     }
-    function openSelectedCompare() {
-      if (selA && selB) openCompareModal(selA.id, selB.id);
-    }
+    function openSelectedCompare() { if (selA && selB) openCompareModal(selA.id, selB.id); }
 
     // ---- Modal de reproducción y comparación lado a lado ----
     function openPreviewSingle(id) {
