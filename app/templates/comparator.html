@@ -20,7 +20,7 @@
           </div>
         </form>
 
-        <form method="post" action="/comparador/scan" class="comp-scan-all-form" onsubmit="return confirm('¿Escanear todo {{ allowed_base }}?\n\nIgnora carpetas internas del NAS (@* / #*) y guarda el avance automáticamente. Puedes pausar o detener en cualquier momento.');">
+        <form method="post" action="/comparador/scan" class="comp-scan-all-form" data-confirm="¿Escanear todo {{ allowed_base }}?&#10;&#10;Ignora carpetas internas del NAS (@* / #*) y guarda el avance automáticamente. Puedes pausar o detener en cualquier momento.">
           <input type="hidden" name="view" value="{{ view }}">
           <input type="hidden" name="scan_all" value="1">
           <input type="hidden" name="only_media" value="1" id="compOnlyMediaHidden2">
@@ -45,7 +45,7 @@
         {% endif %}
 
         {% if stats.total_files and not comp_state.running %}
-          <form method="post" action="/comparador/clear" onsubmit="return confirm('¿Vaciar el registro del comparador para empezar limpio?\n\nNO borra ningún archivo de tu NAS.');">
+          <form method="post" action="/comparador/clear" data-confirm="¿Vaciar el registro del comparador para empezar limpio?&#10;&#10;NO borra ningún archivo de tu NAS.">
             <input type="hidden" name="view" value="{{ view }}">
             <button type="submit" class="btn btn-ghost btn-sm">🧹 Vaciar registro</button>
           </form>
@@ -56,7 +56,7 @@
         <div class="comp-shares-bar">
           <span class="comp-shares-label">Acceso rápido:</span>
           {% for s in top_shares %}
-            <button type="button" class="btn btn-ghost btn-sm" onclick="pickShare({{ s.path|tojson }})">📁 {{ s.name }}</button>
+            <button type="button" class="btn btn-ghost btn-sm" data-path="{{ s.path }}" onclick="pickShare(this.dataset.path)">📁 {{ s.name }}</button>
           {% endfor %}
         </div>
       {% endif %}
@@ -169,7 +169,7 @@
                   <input type="hidden" name="min_scan_mb" value="50">
                   <button type="submit" class="btn btn-secondary btn-sm" {% if comp_state.running %}disabled{% endif %} title="Revisa solo archivos nuevos o cambiados">🔄 Actualizar</button>
                 </form>
-                <form method="post" action="/comparador/root/forget" onsubmit="return confirm('¿Quitar {{ r.root_path }} del registro del comparador?\n\nTus archivos en el NAS NO se borran.');">
+                <form method="post" action="/comparador/root/forget" data-confirm="¿Quitar {{ r.root_path }} del registro del comparador?&#10;&#10;Tus archivos en el NAS NO se borran.">
                   <input type="hidden" name="view" value="{{ view }}">
                   <input type="hidden" name="root_path" value="{{ r.root_path }}">
                   <button type="submit" class="btn btn-ghost btn-sm" title="Quitar del registro sin borrar nada del disco">✕ Olvidar</button>
@@ -238,7 +238,7 @@
             <strong>🛡️ Limpieza segura de duplicados exactos</strong>
             <p>Se verifica el <strong>SHA-256 completo byte a byte</strong> y que la copia conservada siga legible. <strong>Nada se borra definitivo:</strong> las copias sobrantes se mueven a la Papelera junto con la ruta exacta de la copia que se quedó viva.</p>
           </div>
-          <form method="post" action="/comparador/identical/clean-all" onsubmit="return confirm('🛡️ LIMPIEZA SEGURA EN LOTE\n\nSe verificará SHA-256 completo de los {{ stats.identical_groups }} grupo(s) y se moverán las copias sobrantes a la Papelera ({{ stats.reclaimable_text }} ahorrables).\n\n• NADA se borra definitivo.\n• En cada grupo se conserva la copia marcada con ✅ SE CONSERVA.\n• En Papelera quedará registrada la ruta exacta de cada copia conservada.\n\n¿Iniciar?');">
+          <form method="post" action="/comparador/identical/clean-all" data-confirm="🛡️ LIMPIEZA SEGURA EN LOTE&#10;&#10;Se verificará SHA-256 completo de los {{ stats.identical_groups }} grupo(s) y se moverán las copias sobrantes a la Papelera ({{ stats.reclaimable_text }} ahorrables).&#10;&#10;• NADA se borra definitivo.&#10;• En cada grupo se conserva la copia marcada con ✅ SE CONSERVA.&#10;• En Papelera quedará registrada la ruta exacta de cada copia conservada.&#10;&#10;¿Iniciar?">
             <button type="submit" class="btn btn-primary" {% if comp_state.running or clean_state.running %}disabled{% endif %}>🛡️ Limpiar todos a Papelera ({{ stats.reclaimable_text }})</button>
           </form>
         </div>
@@ -246,7 +246,7 @@
         <div class="comp-groups">
           {% for g in identical_groups %}
             <section class="comp-group-card">
-              <form method="post" action="/comparador/identical/clean-group" onsubmit="return confirm('Se verificará SHA-256 completo de este grupo.\n\n• Se CONSERVA únicamente la copia que marcaste.\n• Las demás copias se mueven a la Papelera (recuperables en cualquier momento).\n\n¿Continuar?');">
+              <form method="post" action="/comparador/identical/clean-group" data-confirm="Se verificará SHA-256 completo de este grupo.&#10;&#10;• Se CONSERVA únicamente la copia que marcaste.&#10;• Las demás copias se mueven a la Papelera (recuperables en cualquier momento).&#10;&#10;¿Continuar?">
                 <input type="hidden" name="fast_hash" value="{{ g.key }}">
                 <input type="hidden" name="size_bytes" value="{{ g.size_bytes }}">
                 <input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="root" value="{{ root }}"><input type="hidden" name="min_mb" value="{{ min_mb }}">
@@ -261,6 +261,7 @@
                       <button type="button" class="btn btn-secondary btn-sm" onclick="openCompareModal({{ g.files[0].id }}, {{ g.files[1].id }})">⚖️ Ver lado a lado</button>
                     {% endif %}
                     <button type="submit" class="btn btn-primary btn-sm">🛡️ Conservar elegida y mover sobrantes a Papelera</button>
+                    <button type="submit" class="btn btn-danger btn-sm" formaction="/comparador/identical/trash-all" data-confirm="¿Enviar TODAS las {{ g.count }} copias de este grupo a la Papelera?&#10;&#10;• No quedará ninguna copia en sus carpetas originales.&#10;• Podrás restaurarlas desde la Papelera si te arrepientes.">🗂️ Mandar todos a Papelera</button>
                   </div>
                 </div>
 
@@ -283,7 +284,7 @@
                       </div>
                       <div class="comp-row-actions">
                         <button type="button" class="btn btn-secondary btn-sm" onclick="event.preventDefault(); openPreviewSingle({{ f.id }})">▶️ Ver</button>
-                        <button type="button" class="btn btn-ghost btn-sm" onclick="event.preventDefault(); copyText({{ f.path|tojson }}, this)">📋</button>
+                        <button type="button" class="btn btn-ghost btn-sm" data-path="{{ f.path }}" onclick="event.preventDefault(); copyText(this.dataset.path, this)">📋</button>
                       </div>
                     </label>
                   {% endfor %}
@@ -323,7 +324,12 @@
                   <form method="post" action="/comparador/same-name/ignore" style="margin:0;">
                     <input type="hidden" name="norm_name" value="{{ g.key }}">
                     <input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="root" value="{{ root }}"><input type="hidden" name="min_mb" value="{{ min_mb }}">
-                    <button type="submit" class="btn btn-ghost btn-sm" title="Dejar todos como están y ocultar este grupo">🤝 Conservar todos (No preguntar más)</button>
+                    <button type="submit" class="btn btn-ghost btn-sm" title="Si el comparador los agrupó mal o quieres dejar todos como están">🤝 No son duplicados (ocultar grupo)</button>
+                  </form>
+                  <form method="post" action="/comparador/same-name/trash-all" style="margin:0;" data-confirm="¿Enviar TODOS los {{ g.count }} archivo(s) de este grupo ({{ g.total_text }}) a la Papelera?&#10;&#10;• No quedará ninguno en sus carpetas originales.&#10;• Podrás restaurarlos desde la Papelera si te arrepientes.">
+                    <input type="hidden" name="norm_name" value="{{ g.key }}">
+                    <input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="root" value="{{ root }}"><input type="hidden" name="min_mb" value="{{ min_mb }}">
+                    <button type="submit" class="btn btn-danger btn-sm" title="Enviar todos los archivos de este grupo a la Papelera">🗂️ Mandar todos a Papelera</button>
                   </form>
                 </div>
               </div>
@@ -341,12 +347,22 @@
                     </div>
                     <div class="comp-row-actions">
                       <button type="button" class="btn btn-secondary btn-sm" onclick="openPreviewSingle({{ f.id }})">▶️ Ver</button>
-                      <button type="button" class="btn btn-ghost btn-sm" onclick="selectForCompare({{ f.id }}, {{ f.filename|tojson }})">⚖️ A/B</button>
-                      <form method="post" action="/comparador/same-name/keep" onsubmit="return confirm('¿CONSERVAR este archivo y mover las otras {{ g.count - 1 }} versión(es) a la Papelera?\n\n✅ SE CONSERVA:\n{{ f.path }}\n\nLas demás irán a Papelera (recuperables en cualquier momento).');">
+                      <button type="button" class="btn btn-ghost btn-sm" data-file-id="{{ f.id }}" data-filename="{{ f.filename }}" onclick="selectForCompare(Number(this.dataset.fileId), this.dataset.filename)">⚖️ A/B</button>
+                      <form method="post" action="/comparador/same-name/keep" data-confirm="¿CONSERVAR este archivo y mover las otras {{ g.count - 1 }} versión(es) a la Papelera?&#10;&#10;✅ SE CONSERVA:&#10;{{ f.path }}&#10;&#10;Las demás irán a Papelera (recuperables en cualquier momento).">
                         <input type="hidden" name="keep_id" value="{{ f.id }}">
                         <input type="hidden" name="norm_name" value="{{ g.key }}">
                         <input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="root" value="{{ root }}"><input type="hidden" name="min_mb" value="{{ min_mb }}">
                         <button type="submit" class="btn btn-primary btn-sm">✅ Conservar esta</button>
+                      </form>
+                      <form method="post" action="/comparador/trash" data-confirm="¿Mover SOLO este archivo a la Papelera?&#10;&#10;{{ f.path }}&#10;&#10;Los demás archivos del grupo se quedan intactos.">
+                        <input type="hidden" name="file_id" value="{{ f.id }}">
+                        <input type="hidden" name="view" value="same_name"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="root" value="{{ root }}"><input type="hidden" name="min_mb" value="{{ min_mb }}">
+                        <button type="submit" class="btn btn-secondary btn-sm" title="Enviar solo este archivo a la Papelera">🗂️ Papelera</button>
+                      </form>
+                      <form method="post" action="/comparador/same-name/exclude">
+                        <input type="hidden" name="file_id" value="{{ f.id }}">
+                        <input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="root" value="{{ root }}"><input type="hidden" name="min_mb" value="{{ min_mb }}">
+                        <button type="submit" class="btn btn-ghost btn-sm" title="Sacar este archivo del grupo (si se reconoció mal). NO borra ni mueve nada.">✕ Sacar</button>
                       </form>
                     </div>
                   </div>
@@ -411,14 +427,14 @@
               </div>
               <div class="comp-row-actions">
                 <button type="button" class="btn btn-secondary btn-sm" onclick="openPreviewSingle({{ f.id }})">▶️ Ver</button>
-                <button type="button" class="btn btn-ghost btn-sm" onclick="selectForCompare({{ f.id }}, {{ f.filename|tojson }})">⚖️ A/B</button>
-                <button type="button" class="btn btn-ghost btn-sm" onclick="copyText({{ f.path|tojson }}, this)">📋 Ruta</button>
-                <form method="post" action="/comparador/trash" onsubmit="return confirm('¿Mover a la papelera del comparador?\n\n{{ f.path }}');">
+                <button type="button" class="btn btn-ghost btn-sm" data-file-id="{{ f.id }}" data-filename="{{ f.filename }}" onclick="selectForCompare(Number(this.dataset.fileId), this.dataset.filename)">⚖️ A/B</button>
+                <button type="button" class="btn btn-ghost btn-sm" data-path="{{ f.path }}" onclick="copyText(this.dataset.path, this)">📋 Ruta</button>
+                <form method="post" action="/comparador/trash" data-confirm="¿Mover a la papelera del comparador?&#10;&#10;{{ f.path }}">
                   <input type="hidden" name="file_id" value="{{ f.id }}">
                   <input type="hidden" name="view" value="{{ view }}"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="root" value="{{ root }}"><input type="hidden" name="min_mb" value="{{ min_mb }}">
                   <button type="submit" class="btn btn-secondary btn-sm" title="Mover a papelera ({{ trash_dir }})">🗂️</button>
                 </form>
-                <form method="post" action="/comparador/delete" onsubmit="return confirm('⚠️ BORRADO DEFINITIVO\n\n{{ f.path }}\nTamaño: {{ f.size_text }}\n\nEsta acción NO se puede deshacer. ¿Seguro?');">
+                <form method="post" action="/comparador/delete" data-confirm="⚠️ BORRADO DEFINITIVO&#10;&#10;{{ f.path }}&#10;Tamaño: {{ f.size_text }}&#10;&#10;Esta acción NO se puede deshacer. ¿Seguro?">
                   <input type="hidden" name="file_id" value="{{ f.id }}">
                   <input type="hidden" name="view" value="{{ view }}"><input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="root" value="{{ root }}"><input type="hidden" name="min_mb" value="{{ min_mb }}">
                   <button type="submit" class="btn btn-danger btn-sm" title="Borrar definitivamente del disco">🗑️</button>
@@ -442,7 +458,7 @@
           <p>Carpeta en tu NAS: <code>{{ trash_dir }}</code>. Puedes restaurar cualquier archivo a su carpeta original o vaciar la papelera cuando estés seguro.</p>
         </div>
         {% if trashed %}
-          <form method="post" action="/comparador/trash/empty" onsubmit="return confirm('⚠️ VACIAR PAPELERA DEFINITIVAMENTE\n\nSe borrarán {{ stats.trashed_count }} archivo(s) y se liberarán {{ stats.trashed_text }} de tu NAS.\n\nLas copias conservadas en tus carpetas NO se tocan.\nEsta acción NO se puede deshacer. ¿Seguro?');">
+          <form method="post" action="/comparador/trash/empty" data-confirm="⚠️ VACIAR PAPELERA DEFINITIVAMENTE&#10;&#10;Se borrarán {{ stats.trashed_count }} archivo(s) y se liberarán {{ stats.trashed_text }} de tu NAS.&#10;&#10;Las copias conservadas en tus carpetas NO se tocan.&#10;Esta acción NO se puede deshacer. ¿Seguro?">
             <button type="submit" class="btn btn-danger">🗑️ Vaciar papelera (liberar {{ stats.trashed_text }})</button>
           </form>
         {% endif %}
@@ -462,7 +478,7 @@
                 {% if f.kept_copy_path %}
                   <div class="comp-kept-box">
                     <span>✅ <strong>Copia conservada en:</strong> <code>{{ f.kept_copy_path }}</code></span>
-                    <button type="button" class="btn btn-ghost btn-sm" onclick="copyText({{ f.kept_copy_path|tojson }}, this)">📋 Copiar ruta</button>
+                    <button type="button" class="btn btn-ghost btn-sm" data-path="{{ f.kept_copy_path }}" onclick="copyText(this.dataset.path, this)">📋 Copiar ruta</button>
                   </div>
                 {% endif %}
                 <small class="comp-meta">Movido a papelera: {{ f.trashed_at }}</small>
@@ -473,7 +489,7 @@
                   <input type="hidden" name="file_id" value="{{ f.id }}">
                   <button type="submit" class="btn btn-primary btn-sm">↩️ Restaurar</button>
                 </form>
-                <form method="post" action="/comparador/delete" onsubmit="return confirm('⚠️ BORRADO DEFINITIVO\n\n{{ f.path }}\n\nEsta acción NO se puede deshacer. ¿Seguro?');">
+                <form method="post" action="/comparador/delete" data-confirm="⚠️ BORRADO DEFINITIVO&#10;&#10;{{ f.path }}&#10;&#10;Esta acción NO se puede deshacer. ¿Seguro?">
                   <input type="hidden" name="file_id" value="{{ f.id }}">
                   <input type="hidden" name="view" value="trash">
                   <button type="submit" class="btn btn-danger btn-sm">🗑️ Borrar</button>
@@ -513,6 +529,7 @@
         <button type="button" class="btn btn-ghost btn-sm" onclick="closeCompareModal()">✕ Cerrar</button>
       </div>
       <div id="compModalGrid" class="comp-modal-grid"></div>
+      <div id="compModalDualBar" class="comp-pane-actions hidden" style="margin-top:.85rem; padding-top:.75rem; border-top:1px solid var(--border, #2c3545); justify-content:center;"></div>
     </div>
   </div>
 
@@ -721,13 +738,35 @@
     }
     function openSelectedCompare() { if (selA && selB) openCompareModal(selA.id, selB.id); }
 
+    // ---- Confirmación segura (soporta comillas/apóstrofes) y bloqueo anti-doble-clic ----
+    document.addEventListener("submit", function (ev) {
+      var form = ev.target;
+      if (!form || !form.closest || !form.closest(".comp-page")) return;
+      var submitter = ev.submitter || form.querySelector('button[type="submit"]');
+      var msg = (submitter && submitter.dataset && submitter.dataset.confirm)
+        || (form.dataset && form.dataset.confirm)
+        || "";
+      if (msg && !confirm(msg)) {
+        ev.preventDefault();
+        return;
+      }
+      if (submitter && !submitter.disabled) {
+        submitter.disabled = true;
+        submitter.dataset.originalText = submitter.textContent;
+        submitter.textContent = "⏳ Procesando...";
+      }
+    });
+
     // ---- Modal de reproducción y comparación lado a lado ----
+    var _modalBusy = false;
     function openPreviewSingle(id) {
       document.getElementById("compModalTitle").textContent = "▶️ Previsualizar archivo";
       document.getElementById("compPreviewModal").classList.remove("hidden");
       var grid = document.getElementById("compModalGrid");
       grid.className = "comp-modal-grid single";
       grid.innerHTML = "<div class='comp-pane' id='pane-0'>Cargando...</div>";
+      var bar = document.getElementById("compModalDualBar");
+      if (bar) { bar.innerHTML = ""; bar.classList.add("hidden"); }
       loadPane("pane-0", id, "Archivo");
     }
 
@@ -737,6 +776,39 @@
       var grid = document.getElementById("compModalGrid");
       grid.className = "comp-modal-grid dual";
       grid.innerHTML = "<div class='comp-pane' id='pane-0'>Cargando A...</div><div class='comp-pane' id='pane-1'>Cargando B...</div>";
+      var bar = document.getElementById("compModalDualBar");
+      if (bar) {
+        bar.innerHTML = "";
+        bar.classList.remove("hidden");
+
+        var btnKeepA = document.createElement("button");
+        btnKeepA.type = "button";
+        btnKeepA.className = "btn btn-primary btn-sm";
+        btnKeepA.textContent = "✅ Conservar A (B a Papelera)";
+        btnKeepA.addEventListener("click", function () {
+          modalPairAction([idA, idB], idA, "¿Conservar Archivo A y enviar Archivo B a la Papelera?", btnKeepA);
+        });
+
+        var btnKeepB = document.createElement("button");
+        btnKeepB.type = "button";
+        btnKeepB.className = "btn btn-primary btn-sm";
+        btnKeepB.textContent = "✅ Conservar B (A a Papelera)";
+        btnKeepB.addEventListener("click", function () {
+          modalPairAction([idA, idB], idB, "¿Conservar Archivo B y enviar Archivo A a la Papelera?", btnKeepB);
+        });
+
+        var btnTrashBoth = document.createElement("button");
+        btnTrashBoth.type = "button";
+        btnTrashBoth.className = "btn btn-danger btn-sm";
+        btnTrashBoth.textContent = "🗂️ Enviar ambos (A y B) a Papelera";
+        btnTrashBoth.addEventListener("click", function () {
+          modalPairAction([idA, idB], null, "¿Enviar AMBOS archivos (A y B) a la Papelera?\n\nPodrás restaurarlos luego desde Papelera si te arrepientes.", btnTrashBoth);
+        });
+
+        bar.appendChild(btnKeepA);
+        bar.appendChild(btnKeepB);
+        bar.appendChild(btnTrashBoth);
+      }
       loadPane("pane-0", idA, "Archivo A");
       loadPane("pane-1", idB, "Archivo B");
     }
@@ -747,6 +819,8 @@
         try { el.pause(); el.removeAttribute("src"); el.load(); } catch (e) {}
       });
       document.getElementById("compModalGrid").innerHTML = "";
+      var bar = document.getElementById("compModalDualBar");
+      if (bar) { bar.innerHTML = ""; bar.classList.add("hidden"); }
       modal.classList.add("hidden");
     }
 
@@ -796,11 +870,40 @@
               (f.audio_summary ? '<div><strong>Audio:</strong> ' + escHtml(f.audio_summary) + '</div>' : '') +
               '<div class="comp-path"><strong>Ruta:</strong> ' + escHtml(f.path) + '</div>' +
             '</div>' +
-            '<div class="comp-pane-actions">' +
-              '<button type="button" class="btn btn-ghost btn-sm" onclick="copyText(' + JSON.stringify(f.path) + ', this)">📋 Copiar ruta</button>' +
-              '<button type="button" class="btn btn-secondary btn-sm" onclick="modalAction(\'trash\',' + f.id + ',' + JSON.stringify(f.path) + ')">🗂️ Papelera</button>' +
-              '<button type="button" class="btn btn-danger btn-sm" onclick="modalAction(\'delete\',' + f.id + ',' + JSON.stringify(f.path) + ')">🗑️ Borrar definitivo</button>' +
-            '</div>';
+            '<div class="comp-pane-actions"></div>';
+
+          var actions = pane.querySelector(".comp-pane-actions");
+          if (actions) {
+            var btnCopy = document.createElement("button");
+            btnCopy.type = "button";
+            btnCopy.className = "btn btn-ghost btn-sm";
+            btnCopy.textContent = "📋 Copiar ruta";
+            btnCopy.addEventListener("click", function () { copyText(f.path, btnCopy); });
+            actions.appendChild(btnCopy);
+
+            if (f.trashed) {
+              var btnRestore = document.createElement("button");
+              btnRestore.type = "button";
+              btnRestore.className = "btn btn-primary btn-sm";
+              btnRestore.textContent = "↩️ Restaurar";
+              btnRestore.addEventListener("click", function () { modalAction("restore", f.id, f.path, btnRestore); });
+              actions.appendChild(btnRestore);
+            } else {
+              var btnTrash = document.createElement("button");
+              btnTrash.type = "button";
+              btnTrash.className = "btn btn-secondary btn-sm";
+              btnTrash.textContent = "🗂️ Papelera";
+              btnTrash.addEventListener("click", function () { modalAction("trash", f.id, f.path, btnTrash); });
+              actions.appendChild(btnTrash);
+            }
+
+            var btnDel = document.createElement("button");
+            btnDel.type = "button";
+            btnDel.className = "btn btn-danger btn-sm";
+            btnDel.textContent = "🗑️ Borrar definitivo";
+            btnDel.addEventListener("click", function () { modalAction("delete", f.id, f.path, btnDel); });
+            actions.appendChild(btnDel);
+          }
         })
         .catch(function (err) {
           pane.innerHTML = "<p>No pude cargar el archivo: " + escHtml(err.message) + "</p>";
@@ -831,16 +934,52 @@
         .catch(function () { box.innerHTML = "<small>Error generando capturas.</small>"; });
     }
 
-    function modalAction(action, fileId, path) {
+    function modalAction(action, fileId, path, btn) {
+      if (_modalBusy) return;
       var msg = action === "delete"
         ? "⚠️ BORRADO DEFINITIVO\n\n" + path + "\n\nEsta acción NO se puede deshacer. ¿Seguro?"
-        : "¿Mover este archivo a la papelera?\n\n" + path;
+        : (action === "restore"
+          ? "¿Restaurar este archivo a su carpeta original?\n\n" + path
+          : "¿Mover este archivo a la papelera?\n\n" + path);
       if (!confirm(msg)) return;
+      _modalBusy = true;
+      if (btn) { btn.disabled = true; btn.textContent = "⏳ Procesando..."; }
       fetch("/api/comparador/" + action + "/" + fileId, { method: "POST" })
         .then(function (r) { return r.json(); })
         .then(function (res) {
+          _modalBusy = false;
           alert(res.message || "Listo");
           if (res.ok) { closeCompareModal(); location.reload(); }
+          else if (btn) { btn.disabled = false; }
+        })
+        .catch(function () {
+          _modalBusy = false;
+          alert("Error de conexión con el NAS.");
+          if (btn) btn.disabled = false;
+        });
+    }
+
+    function modalPairAction(ids, keepId, confirmMsg, btn) {
+      if (_modalBusy) return;
+      if (!confirm(confirmMsg)) return;
+      _modalBusy = true;
+      if (btn) { btn.disabled = true; btn.textContent = "⏳ Procesando..."; }
+      fetch("/api/comparador/trash-pair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: ids, keep_id: keepId })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (res) {
+          _modalBusy = false;
+          alert(res.message || "Listo");
+          if (res.ok) { closeCompareModal(); location.reload(); }
+          else if (btn) { btn.disabled = false; }
+        })
+        .catch(function () {
+          _modalBusy = false;
+          alert("Error de conexión con el NAS.");
+          if (btn) btn.disabled = false;
         });
     }
   </script>

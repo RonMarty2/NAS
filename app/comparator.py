@@ -78,7 +78,8 @@ CREATE TABLE IF NOT EXISTS comparator_files (
     trashed_from    TEXT,
     trashed_at      TEXT,
     kept_copy_path  TEXT,
-    trash_reason    TEXT
+    trash_reason    TEXT,
+    ignore_similar  INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS comparator_ignored_groups (
@@ -97,10 +98,12 @@ _FILE_MIGRATIONS = {
     "full_sha256": "TEXT",
     "kept_copy_path": "TEXT",
     "trash_reason": "TEXT",
+    "ignore_similar": "INTEGER DEFAULT 0",
 }
 
 _STATE_LOCK = threading.Lock()
 _JOB_LOCK = threading.Lock()
+_TRASH_LOCK = threading.Lock()
 _PAUSE_EVENT = threading.Event()
 _PAUSE_EVENT.set()  # set = no pausado (corriendo)
 _STOP_EVENT = threading.Event()
@@ -1061,6 +1064,7 @@ def summary_stats():
                 SELECT norm_name
                 FROM comparator_files
                 WHERE trashed = 0
+                  AND COALESCE(ignore_similar, 0) = 0
                   AND norm_name != ''
                   AND norm_name NOT IN (SELECT group_key FROM comparator_ignored_groups)
                 GROUP BY norm_name
@@ -1182,6 +1186,7 @@ def list_same_name_groups(q="", kind="", root="", min_mb=0, limit=60):
             SELECT norm_name, COUNT(*) AS cnt, SUM(size_bytes) AS total_size
             FROM comparator_files
             WHERE {clause}
+              AND COALESCE(ignore_similar, 0) = 0
               AND norm_name != ''
               AND norm_name NOT IN (SELECT group_key FROM comparator_ignored_groups)
             GROUP BY norm_name
@@ -1195,7 +1200,7 @@ def list_same_name_groups(q="", kind="", root="", min_mb=0, limit=60):
         for g in groups:
             items = conn.execute(
                 "SELECT * FROM comparator_files "
-                "WHERE trashed = 0 AND norm_name = ? "
+                "WHERE trashed = 0 AND COALESCE(ignore_similar, 0) = 0 AND norm_name = ? "
                 "ORDER BY size_bytes DESC, path ASC",
                 (g["norm_name"],),
             ).fetchall()
@@ -1298,7 +1303,103 @@ def ignore_same_name_group(norm_name):
             "INSERT OR IGNORE INTO comparator_ignored_groups(group_key) VALUES (?)",
             (norm_name,),
         )
-    return True, "Grupo marcado como «Conservar ambos». No volverá a aparecer aquí."
+    return True, "Grupo ocultado («No son duplicados»). Tus archivos no se tocaron."
+
+
+def exclude_from_similar(file_id):
+    """Saca un archivo puntual de 'Decidir similares' (cuando fue mal agrupado) sin tocar el disco."""
+    item = get_file(file_id)
+    if not item:
+        return False, "Archivo no encontrado en el registro."
+    with db._lock, db.get_conn() as conn:
+        conn.execute(
+            "UPDATE comparator_files SET ignore_similar = 1 WHERE id = ?",
+            (int(file_id),),
+        )
+    return True, f"Quitado de «Decidir similares» (tu archivo en el NAS no se tocó): {item['filename']}"
+
+
+def trash_same_name_group(norm_name):
+    """Mueve TODOS los archivos activos de un grupo de 'Decidir similares' a la Papelera."""
+    norm_name = (norm_name or "").strip()
+    if not norm_name:
+        return False, "Grupo no válido."
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, size_bytes FROM comparator_files "
+            "WHERE trashed = 0 AND COALESCE(ignore_similar, 0) = 0 AND norm_name = ?",
+            (norm_name,),
+        ).fetchall()
+    if not rows:
+        return False, "No hay archivos activos en este grupo."
+    moved = 0
+    moved_bytes = 0
+    for r in rows:
+        ok, _ = trash_file(
+            r["id"],
+            kept_copy_path="",
+            reason="Grupo completo enviado a papelera por ti",
+        )
+        if ok:
+            moved += 1
+            moved_bytes += int(r["size_bytes"] or 0)
+    if moved == 0:
+        return False, "No se pudo mover ningún archivo a la papelera."
+    return True, f"Listo: {moved} archivo(s) ({format_bytes(moved_bytes)}) movidos a la Papelera."
+
+
+def trash_identical_group(fast_hash, size_bytes):
+    """Mueve TODOS los archivos activos de un grupo de 'Idénticos' a la Papelera."""
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, size_bytes FROM comparator_files "
+            "WHERE trashed = 0 AND size_bytes = ? AND fast_hash = ?",
+            (int(size_bytes), fast_hash),
+        ).fetchall()
+    if not rows:
+        return False, "No hay archivos activos en este grupo."
+    moved = 0
+    moved_bytes = 0
+    for r in rows:
+        ok, _ = trash_file(
+            r["id"],
+            kept_copy_path="",
+            reason="Grupo idéntico completo enviado a papelera por ti",
+        )
+        if ok:
+            moved += 1
+            moved_bytes += int(r["size_bytes"] or 0)
+    if moved == 0:
+        return False, "No se pudo mover ningún archivo a la papelera."
+    return True, f"Listo: {moved} archivo(s) ({format_bytes(moved_bytes)}) movidos a la Papelera."
+
+
+def trash_files_batch(file_ids, keep_id=None, reason="Descartado al comparar lado a lado"):
+    """Mueve una lista de archivos a Papelera (opcionalmente registrando qué copia se conservó)."""
+    keep_path = ""
+    if keep_id:
+        keeper = get_file(int(keep_id))
+        if not keeper or keeper.get("trashed") or not _is_readable_file(keeper["path"]):
+            return False, "La copia a conservar no está disponible en disco. No se movió nada."
+        keep_path = keeper["path"]
+
+    moved = 0
+    moved_bytes = 0
+    for fid in file_ids:
+        if keep_id and int(fid) == int(keep_id):
+            continue
+        item = get_file(int(fid))
+        if not item or item.get("trashed"):
+            continue
+        ok, _ = trash_file(int(fid), kept_copy_path=keep_path, reason=reason)
+        if ok:
+            moved += 1
+            moved_bytes += int(item.get("size_bytes") or 0)
+    if moved == 0:
+        return False, "No se movió ningún archivo (puede que ya estuvieran en la papelera)."
+    if keep_path:
+        return True, f"Movido(s) {moved} archivo(s) ({format_bytes(moved_bytes)}) a Papelera. Conservado: {keep_path}"
+    return True, f"Movido(s) {moved} archivo(s) ({format_bytes(moved_bytes)}) a Papelera."
 
 
 def clean_identical_group(keep_id, fast_hash, size_bytes):
@@ -1533,7 +1634,7 @@ def keep_one_in_same_name_group(keep_id, norm_name):
     with db.get_conn() as conn:
         others = conn.execute(
             "SELECT id, path, size_bytes FROM comparator_files "
-            "WHERE trashed = 0 AND norm_name = ? AND id != ?",
+            "WHERE trashed = 0 AND COALESCE(ignore_similar, 0) = 0 AND norm_name = ? AND id != ?",
             (norm_name, int(keep_id)),
         ).fetchall()
     if not others:
@@ -1702,141 +1803,147 @@ def _unique_dest(dest_dir, filename):
 
 
 def trash_file(file_id, kept_copy_path="", reason="Movido manualmente"):
-    item = get_file(file_id)
-    if not item:
-        return False, "Archivo no encontrado en el registro."
-    src = item["path"]
-    if not is_allowed_path(src):
-        return False, "Ruta fuera de los límites permitidos."
-    if not os.path.isfile(src):
-        with db._lock, db.get_conn() as conn:
-            conn.execute("DELETE FROM comparator_files WHERE id=?", (file_id,))
-        return True, "El archivo ya no estaba en disco; se quitó del registro."
+    with _TRASH_LOCK:
+        item = get_file(file_id)
+        if not item:
+            return False, "Archivo no encontrado en el registro."
+        if item.get("trashed"):
+            return True, "Este archivo ya estaba en la papelera."
+        src = item["path"]
+        if not is_allowed_path(src):
+            return False, "Ruta fuera de los límites permitidos."
+        if not os.path.isfile(src):
+            with db._lock, db.get_conn() as conn:
+                conn.execute("DELETE FROM comparator_files WHERE id=?", (file_id,))
+            return True, "El archivo ya no estaba en disco; se quitó del registro."
 
-    tdir = trash_dir()
-    if not is_allowed_path(tdir):
-        return False, "La carpeta de papelera está fuera del volumen permitido."
-    try:
-        os.makedirs(tdir, exist_ok=True)
-        dest = _unique_dest(tdir, os.path.basename(src))
+        tdir = trash_dir()
+        if not is_allowed_path(tdir):
+            return False, "La carpeta de papelera está fuera del volumen permitido."
         try:
-            os.replace(src, dest)
-        except OSError:
-            shutil.move(src, dest)
-    except OSError as exc:
-        return False, f"No pude mover a la papelera: {exc}"
+            os.makedirs(tdir, exist_ok=True)
+            dest = _unique_dest(tdir, os.path.basename(src))
+            try:
+                os.replace(src, dest)
+            except OSError:
+                shutil.move(src, dest)
+        except OSError as exc:
+            return False, f"No pude mover a la papelera: {exc}"
 
-    with db._lock, db.get_conn() as conn:
-        conn.execute(
-            """
-            UPDATE comparator_files
-            SET path=?, trashed=1, trashed_from=?, trashed_at=?, kept_copy_path=?, trash_reason=?
-            WHERE id=?
-            """,
-            (dest, src, _now(), kept_copy_path or "", reason or "", file_id),
-        )
-    db.delete_catalog_file(src)
-    catalog.invalidate_build()
-    _refresh_root_stats(item["root_path"], "ok")
-    return True, f"Movido a papelera: {dest}"
+        with db._lock, db.get_conn() as conn:
+            conn.execute(
+                """
+                UPDATE comparator_files
+                SET path=?, trashed=1, trashed_from=?, trashed_at=?, kept_copy_path=?, trash_reason=?
+                WHERE id=?
+                """,
+                (dest, src, _now(), kept_copy_path or "", reason or "", file_id),
+            )
+        db.delete_catalog_file(src)
+        catalog.invalidate_build()
+        _refresh_root_stats(item["root_path"], "ok")
+        return True, f"Movido a papelera: {dest}"
 
 
 def restore_file(file_id):
-    item = get_file(file_id)
-    if not item or not item.get("trashed"):
-        return False, "Archivo no encontrado en la papelera."
-    src = item["path"]
-    orig = item.get("trashed_from") or ""
-    if not orig or not is_allowed_path(src) or not is_allowed_path(orig):
-        return False, "Ruta de restauración no válida."
-    if not os.path.isfile(src):
-        with db._lock, db.get_conn() as conn:
-            conn.execute("DELETE FROM comparator_files WHERE id=?", (file_id,))
-        return False, "El archivo ya no existe en la papelera."
-    if os.path.exists(orig):
-        return False, f"Ya existe otro archivo en la ruta original: {orig}"
+    with _TRASH_LOCK:
+        item = get_file(file_id)
+        if not item or not item.get("trashed"):
+            return False, "Archivo no encontrado en la papelera."
+        src = item["path"]
+        orig = item.get("trashed_from") or ""
+        if not orig or not is_allowed_path(src) or not is_allowed_path(orig):
+            return False, "Ruta de restauración no válida."
+        if not os.path.isfile(src):
+            with db._lock, db.get_conn() as conn:
+                conn.execute("DELETE FROM comparator_files WHERE id=?", (file_id,))
+            return False, "El archivo ya no existe en la papelera."
+        if os.path.exists(orig):
+            return False, f"Ya existe otro archivo en la ruta original: {orig}"
 
-    try:
-        os.makedirs(os.path.dirname(orig), exist_ok=True)
         try:
-            os.replace(src, orig)
-        except OSError:
-            shutil.move(src, orig)
-    except OSError as exc:
-        return False, f"No pude restaurar: {exc}"
+            os.makedirs(os.path.dirname(orig), exist_ok=True)
+            try:
+                os.replace(src, orig)
+            except OSError:
+                shutil.move(src, orig)
+        except OSError as exc:
+            return False, f"No pude restaurar: {exc}"
 
-    with db._lock, db.get_conn() as conn:
-        conn.execute(
-            """
-            UPDATE comparator_files
-            SET path=?, trashed=0, trashed_from=NULL, trashed_at=NULL, kept_copy_path=NULL, trash_reason=NULL
-            WHERE id=?
-            """,
-            (orig, file_id),
-        )
-    _refresh_root_stats(item["root_path"], "ok")
-    return True, f"Restaurado en {orig}"
+        with db._lock, db.get_conn() as conn:
+            conn.execute(
+                """
+                UPDATE comparator_files
+                SET path=?, trashed=0, trashed_from=NULL, trashed_at=NULL, kept_copy_path=NULL, trash_reason=NULL
+                WHERE id=?
+                """,
+                (orig, file_id),
+            )
+        _refresh_root_stats(item["root_path"], "ok")
+        return True, f"Restaurado en {orig}"
 
 
 def empty_trash():
     """Borra definitivamente SOLO los archivos que están dentro de la carpeta de Papelera."""
-    with db.get_conn() as conn:
-        rows = conn.execute(
-            "SELECT id, path, size_bytes, trashed_from FROM comparator_files WHERE trashed = 1"
-        ).fetchall()
-    if not rows:
-        return True, "La papelera ya está vacía."
+    with _TRASH_LOCK:
+        with db.get_conn() as conn:
+            rows = conn.execute(
+                "SELECT id, path, size_bytes, trashed_from FROM comparator_files WHERE trashed = 1"
+            ).fetchall()
+        if not rows:
+            return True, "La papelera ya está vacía."
 
-    deleted = 0
-    freed = 0
-    errors = 0
-    deleted_ids = []
-    for r in rows:
-        p = r["path"] or ""
-        if not _is_inside_trash(p):
-            errors += 1
-            continue
-        try:
-            if os.path.isfile(p):
-                os.remove(p)
-            deleted += 1
-            freed += int(r["size_bytes"] or 0)
-            deleted_ids.append((r["id"],))
-            db.delete_catalog_file(p)
-            if r["trashed_from"]:
-                db.delete_catalog_file(r["trashed_from"])
-        except OSError:
-            errors += 1
+        deleted = 0
+        freed = 0
+        errors = 0
+        deleted_ids = []
+        for r in rows:
+            p = r["path"] or ""
+            if not _is_inside_trash(p):
+                errors += 1
+                continue
+            try:
+                if os.path.isfile(p):
+                    os.remove(p)
+                deleted += 1
+                freed += int(r["size_bytes"] or 0)
+                deleted_ids.append((r["id"],))
+                db.delete_catalog_file(p)
+                if r["trashed_from"]:
+                    db.delete_catalog_file(r["trashed_from"])
+            except OSError:
+                errors += 1
 
-    if deleted_ids:
-        with db._lock, db.get_conn() as conn:
-            conn.executemany("DELETE FROM comparator_files WHERE id=?", deleted_ids)
-        catalog.invalidate_build()
+        if deleted_ids:
+            with db._lock, db.get_conn() as conn:
+                conn.executemany("DELETE FROM comparator_files WHERE id=?", deleted_ids)
+            catalog.invalidate_build()
 
-    msg = f"Papelera vaciada: {deleted} archivo(s) borrados, {format_bytes(freed)} liberados."
-    if errors:
-        msg += f" ({errors} no se pudieron borrar)."
-    return True, msg
+        msg = f"Papelera vaciada: {deleted} archivo(s) borrados, {format_bytes(freed)} liberados."
+        if errors:
+            msg += f" ({errors} no se pudieron borrar)."
+        return True, msg
 
 
 def delete_file_permanent(file_id):
-    item = get_file(file_id)
-    if not item:
-        return False, "Archivo no encontrado en el registro."
-    path = item["path"]
-    if not is_allowed_path(path):
-        return False, "Ruta fuera de los límites permitidos."
-    try:
-        if os.path.isfile(path):
-            os.remove(path)
-    except OSError as exc:
-        return False, f"No pude borrar el archivo: {exc}"
+    with _TRASH_LOCK:
+        item = get_file(file_id)
+        if not item:
+            return False, "Archivo no encontrado en el registro."
+        path = item["path"]
+        if not is_allowed_path(path):
+            return False, "Ruta fuera de los límites permitidos."
+        try:
+            if os.path.isfile(path):
+                os.remove(path)
+        except OSError as exc:
+            return False, f"No pude borrar el archivo: {exc}"
 
-    with db._lock, db.get_conn() as conn:
-        conn.execute("DELETE FROM comparator_files WHERE id=?", (file_id,))
-    db.delete_catalog_file(path)
-    if item.get("trashed_from"):
-        db.delete_catalog_file(item["trashed_from"])
-    catalog.invalidate_build()
-    _refresh_root_stats(item["root_path"], "ok")
-    return True, f"Borrado definitivamente: {path}"
+        with db._lock, db.get_conn() as conn:
+            conn.execute("DELETE FROM comparator_files WHERE id=?", (file_id,))
+        db.delete_catalog_file(path)
+        if item.get("trashed_from"):
+            db.delete_catalog_file(item["trashed_from"])
+        catalog.invalidate_build()
+        _refresh_root_stats(item["root_path"], "ok")
+        return True, f"Borrado definitivamente: {path}"

@@ -2208,6 +2208,19 @@ def comparator_clean_group(
     return _comp_redirect(view="identical", q=q, kind=kind, root=root, min_mb=min_mb, msg=message)
 
 
+@app.post("/comparador/identical/trash-all")
+def comparator_identical_trash_all(
+    fast_hash: str = Form(...),
+    size_bytes: int = Form(...),
+    q: str = Form(""),
+    kind: str = Form(""),
+    root: str = Form(""),
+    min_mb: str = Form(""),
+):
+    _, message = comparator.trash_identical_group(fast_hash, size_bytes)
+    return _comp_redirect(view="identical", q=q, kind=kind, root=root, min_mb=min_mb, msg=message)
+
+
 @app.post("/comparador/identical/clean-all")
 def comparator_clean_all():
     _, message = comparator.start_clean_all_identical()
@@ -2247,6 +2260,30 @@ def comparator_same_name_ignore(
     min_mb: str = Form(""),
 ):
     _, message = comparator.ignore_same_name_group(norm_name)
+    return _comp_redirect(view="same_name", q=q, kind=kind, root=root, min_mb=min_mb, msg=message)
+
+
+@app.post("/comparador/same-name/trash-all")
+def comparator_same_name_trash_all(
+    norm_name: str = Form(...),
+    q: str = Form(""),
+    kind: str = Form(""),
+    root: str = Form(""),
+    min_mb: str = Form(""),
+):
+    _, message = comparator.trash_same_name_group(norm_name)
+    return _comp_redirect(view="same_name", q=q, kind=kind, root=root, min_mb=min_mb, msg=message)
+
+
+@app.post("/comparador/same-name/exclude")
+def comparator_same_name_exclude(
+    file_id: int = Form(...),
+    q: str = Form(""),
+    kind: str = Form(""),
+    root: str = Form(""),
+    min_mb: str = Form(""),
+):
+    _, message = comparator.exclude_from_similar(file_id)
     return _comp_redirect(view="same_name", q=q, kind=kind, root=root, min_mb=min_mb, msg=message)
 
 
@@ -2344,6 +2381,25 @@ def api_comparator_file(file_id: int, probe: int = 0):
 @app.post("/api/comparador/trash/{file_id}")
 def api_comparator_trash(file_id: int):
     ok, message = comparator.trash_file(file_id)
+    return {"ok": ok, "message": message}
+
+
+@app.post("/api/comparador/restore/{file_id}")
+def api_comparator_restore(file_id: int):
+    ok, message = comparator.restore_file(file_id)
+    return {"ok": ok, "message": message}
+
+
+@app.post("/api/comparador/trash-pair")
+async def api_comparator_trash_pair(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        return {"ok": False, "message": "Solicitud inválida."}
+    ids = payload.get("ids") or []
+    keep_id = payload.get("keep_id")
+    reason = payload.get("reason") or "Descartado al comparar lado a lado"
+    ok, message = comparator.trash_files_batch(ids, keep_id=keep_id, reason=reason)
     return {"ok": ok, "message": message}
 
 
