@@ -1965,8 +1965,18 @@ def restore_file(file_id):
         if not os.path.isfile(src):
             with db._lock, db.get_conn() as conn:
                 conn.execute("DELETE FROM comparator_files WHERE id=?", (file_id,))
-            return False, "El archivo ya no existe en la papelera."
+            if os.path.isfile(orig):
+                return True, "El archivo ya estaba restaurado en su carpeta original; se quitó de la Papelera."
+            return True, "El archivo ya no estaba en la papelera; se limpió del registro."
         if os.path.exists(orig):
+            try:
+                if os.path.getsize(src) == os.path.getsize(orig):
+                    return False, (
+                        "El archivo ya existe completo en la carpeta original (mismo tamaño). "
+                        "Puedes pulsar «Borrar» aquí en la Papelera para eliminar solo la copia sobrante."
+                    )
+            except OSError:
+                pass
             return False, f"Ya existe otro archivo en la ruta original: {orig}"
 
         try:
@@ -1979,6 +1989,8 @@ def restore_file(file_id):
             return False, f"No pude restaurar: {exc}"
 
         with db._lock, db.get_conn() as conn:
+            # Si un re-escaneo ya había vuelto a registrar `orig`, evitamos error UNIQUE(path)
+            conn.execute("DELETE FROM comparator_files WHERE path=? AND id!=?", (orig, file_id))
             conn.execute(
                 """
                 UPDATE comparator_files
