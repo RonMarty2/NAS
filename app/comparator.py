@@ -103,7 +103,10 @@ _FILE_MIGRATIONS = {
 
 _STATE_LOCK = threading.Lock()
 _JOB_LOCK = threading.Lock()
-_TRASH_LOCK = threading.Lock()
+_BUSY_LOCK = threading.Lock()
+_BUSY_FILE_IDS = set()
+_DB_INIT_LOCK = threading.Lock()
+_DB_INITIALIZED = False
 _PAUSE_EVENT = threading.Event()
 _PAUSE_EVENT.set()  # set = no pausado (corriendo)
 _STOP_EVENT = threading.Event()
@@ -157,23 +160,30 @@ _NOISE_RE = re.compile(
 )
 
 
-def init_db():
-    with db._lock, db.get_conn() as conn:
-        conn.executescript(_SCHEMA)
-        existing_cols = {
-            r["name"] for r in conn.execute("PRAGMA table_info(comparator_files)").fetchall()
-        }
-        for col, coltype in _FILE_MIGRATIONS.items():
-            if col not in existing_cols:
-                conn.execute(f"ALTER TABLE comparator_files ADD COLUMN {col} {coltype}")
-        # Limpia automáticamente cualquier archivo interno de sistema Synology (@* / #*)
-        # que pudiera haberse colado en una versión anterior.
-        conn.execute(
-            "DELETE FROM comparator_files WHERE path LIKE '%/@%' OR path LIKE '%/#%' OR path LIKE '%\\@%' OR path LIKE '%\\#%'"
-        )
-        conn.execute(
-            "DELETE FROM comparator_roots WHERE root_path LIKE '%/@%' OR root_path LIKE '%/#%'"
-        )
+def init_db(force=False):
+    global _DB_INITIALIZED
+    if _DB_INITIALIZED and not force:
+        return
+    with _DB_INIT_LOCK:
+        if _DB_INITIALIZED and not force:
+            return
+        with db._lock, db.get_conn() as conn:
+            conn.executescript(_SCHEMA)
+            existing_cols = {
+                r["name"] for r in conn.execute("PRAGMA table_info(comparator_files)").fetchall()
+            }
+            for col, coltype in _FILE_MIGRATIONS.items():
+                if col not in existing_cols:
+                    conn.execute(f"ALTER TABLE comparator_files ADD COLUMN {col} {coltype}")
+            # Limpia automáticamente cualquier archivo interno de sistema Synology (@* / #*)
+            # que pudiera haberse colado en una versión anterior.
+            conn.execute(
+                "DELETE FROM comparator_files WHERE path LIKE '%/@%' OR path LIKE '%/#%' OR path LIKE '%\\@%' OR path LIKE '%\\#%'"
+            )
+            conn.execute(
+                "DELETE FROM comparator_roots WHERE root_path LIKE '%/@%' OR root_path LIKE '%/#%'"
+            )
+        _DB_INITIALIZED = True
 
 
 def _persist_state():
@@ -298,6 +308,32 @@ def is_allowed_path(path):
     return rp == rb or rp.startswith(rb + os.sep)
 
 
+def _trash_dir_for_file(src):
+    """Devuelve la carpeta de papelera en el MISMO volumen/carpeta compartida que `src`.
+
+    En Synology Btrfs cada carpeta compartida (/volume1/homes, /volume1/video, etc.) es
+    un subvolumen distinto: mover a /volume1/_papelera_nas_organizer obligaría a copiar
+    gigabytes byte a byte. Poniendo _papelera_nas_organizer dentro de la misma carpeta
+    compartida, `os.replace()` es INSTANTÁNEO (0 ms, sin copiar datos).
+    """
+    custom = (db.get_setting(TRASH_DIR_SETTING, "") or "").strip()
+    if custom and is_allowed_path(custom):
+        return os.path.normpath(custom)
+    try:
+        base = os.path.realpath(allowed_base())
+        rsrc = os.path.realpath(src)
+        if rsrc.startswith(base + os.sep):
+            rel = rsrc[len(base) + 1:]
+            parts = [p for p in rel.split(os.sep) if p]
+            if len(parts) >= 2:
+                same_share_trash = os.path.join(base, parts[0], DEFAULT_TRASH_DIRNAME)
+                if is_allowed_path(same_share_trash):
+                    return os.path.normpath(same_share_trash)
+    except (OSError, TypeError, ValueError):
+        pass
+    return trash_dir()
+
+
 def _is_inside_trash(path):
     if not path:
         return False
@@ -306,7 +342,12 @@ def _is_inside_trash(path):
         rt = os.path.realpath(trash_dir())
     except (OSError, TypeError, ValueError):
         return False
-    return rp.startswith(rt + os.sep)
+    if rp.startswith(rt + os.sep):
+        return True
+    if not is_allowed_path(rp):
+        return False
+    parts = [p.lower() for p in rp.split(os.sep) if p]
+    return DEFAULT_TRASH_DIRNAME.lower() in parts[:-1]
 
 
 def _now():
@@ -1802,8 +1843,25 @@ def _unique_dest(dest_dir, filename):
         i += 1
 
 
+def _acquire_file_op(file_id):
+    fid = int(file_id)
+    with _BUSY_LOCK:
+        if fid in _BUSY_FILE_IDS:
+            return False
+        _BUSY_FILE_IDS.add(fid)
+        return True
+
+
+def _release_file_op(file_id):
+    fid = int(file_id)
+    with _BUSY_LOCK:
+        _BUSY_FILE_IDS.discard(fid)
+
+
 def trash_file(file_id, kept_copy_path="", reason="Movido manualmente"):
-    with _TRASH_LOCK:
+    if not _acquire_file_op(file_id):
+        return False, "Este archivo ya se está procesando..."
+    try:
         item = get_file(file_id)
         if not item:
             return False, "Archivo no encontrado en el registro."
@@ -1817,18 +1875,31 @@ def trash_file(file_id, kept_copy_path="", reason="Movido manualmente"):
                 conn.execute("DELETE FROM comparator_files WHERE id=?", (file_id,))
             return True, "El archivo ya no estaba en disco; se quitó del registro."
 
-        tdir = trash_dir()
+        # Primero intenta papelera dentro de la MISMA carpeta compartida (rename instantáneo en Btrfs)
+        tdir = _trash_dir_for_file(src)
+        fallback_tdir = trash_dir()
+        if not is_allowed_path(tdir):
+            tdir = fallback_tdir
         if not is_allowed_path(tdir):
             return False, "La carpeta de papelera está fuera del volumen permitido."
-        try:
-            os.makedirs(tdir, exist_ok=True)
-            dest = _unique_dest(tdir, os.path.basename(src))
+
+        dest = None
+        last_exc = None
+        for cand_dir in (tdir, fallback_tdir) if tdir != fallback_tdir else (tdir,):
             try:
-                os.replace(src, dest)
-            except OSError:
-                shutil.move(src, dest)
-        except OSError as exc:
-            return False, f"No pude mover a la papelera: {exc}"
+                os.makedirs(cand_dir, exist_ok=True)
+                cand_dest = _unique_dest(cand_dir, os.path.basename(src))
+                try:
+                    os.replace(src, cand_dest)
+                except OSError:
+                    shutil.move(src, cand_dest)
+                dest = cand_dest
+                break
+            except OSError as exc:
+                last_exc = exc
+                continue
+        if not dest:
+            return False, f"No pude mover a la papelera: {last_exc}"
 
         with db._lock, db.get_conn() as conn:
             conn.execute(
@@ -1843,10 +1914,14 @@ def trash_file(file_id, kept_copy_path="", reason="Movido manualmente"):
         catalog.invalidate_build()
         _refresh_root_stats(item["root_path"], "ok")
         return True, f"Movido a papelera: {dest}"
+    finally:
+        _release_file_op(file_id)
 
 
 def restore_file(file_id):
-    with _TRASH_LOCK:
+    if not _acquire_file_op(file_id):
+        return False, "Este archivo ya se está procesando..."
+    try:
         item = get_file(file_id)
         if not item or not item.get("trashed"):
             return False, "Archivo no encontrado en la papelera."
@@ -1881,23 +1956,28 @@ def restore_file(file_id):
             )
         _refresh_root_stats(item["root_path"], "ok")
         return True, f"Restaurado en {orig}"
+    finally:
+        _release_file_op(file_id)
 
 
 def empty_trash():
     """Borra definitivamente SOLO los archivos que están dentro de la carpeta de Papelera."""
-    with _TRASH_LOCK:
-        with db.get_conn() as conn:
-            rows = conn.execute(
-                "SELECT id, path, size_bytes, trashed_from FROM comparator_files WHERE trashed = 1"
-            ).fetchall()
-        if not rows:
-            return True, "La papelera ya está vacía."
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, path, size_bytes, trashed_from FROM comparator_files WHERE trashed = 1"
+        ).fetchall()
+    if not rows:
+        return True, "La papelera ya está vacía."
 
-        deleted = 0
-        freed = 0
-        errors = 0
-        deleted_ids = []
-        for r in rows:
+    deleted = 0
+    freed = 0
+    errors = 0
+    deleted_ids = []
+    for r in rows:
+        fid = r["id"]
+        if not _acquire_file_op(fid):
+            continue
+        try:
             p = r["path"] or ""
             if not _is_inside_trash(p):
                 errors += 1
@@ -1907,26 +1987,30 @@ def empty_trash():
                     os.remove(p)
                 deleted += 1
                 freed += int(r["size_bytes"] or 0)
-                deleted_ids.append((r["id"],))
+                deleted_ids.append((fid,))
                 db.delete_catalog_file(p)
                 if r["trashed_from"]:
                     db.delete_catalog_file(r["trashed_from"])
             except OSError:
                 errors += 1
+        finally:
+            _release_file_op(fid)
 
-        if deleted_ids:
-            with db._lock, db.get_conn() as conn:
-                conn.executemany("DELETE FROM comparator_files WHERE id=?", deleted_ids)
-            catalog.invalidate_build()
+    if deleted_ids:
+        with db._lock, db.get_conn() as conn:
+            conn.executemany("DELETE FROM comparator_files WHERE id=?", deleted_ids)
+        catalog.invalidate_build()
 
-        msg = f"Papelera vaciada: {deleted} archivo(s) borrados, {format_bytes(freed)} liberados."
-        if errors:
-            msg += f" ({errors} no se pudieron borrar)."
-        return True, msg
+    msg = f"Papelera vaciada: {deleted} archivo(s) borrados, {format_bytes(freed)} liberados."
+    if errors:
+        msg += f" ({errors} no se pudieron borrar)."
+    return True, msg
 
 
 def delete_file_permanent(file_id):
-    with _TRASH_LOCK:
+    if not _acquire_file_op(file_id):
+        return False, "Este archivo ya se está procesando..."
+    try:
         item = get_file(file_id)
         if not item:
             return False, "Archivo no encontrado en el registro."
@@ -1947,3 +2031,5 @@ def delete_file_permanent(file_id):
         catalog.invalidate_build()
         _refresh_root_stats(item["root_path"], "ok")
         return True, f"Borrado definitivamente: {path}"
+    finally:
+        _release_file_op(file_id)

@@ -1,4 +1,5 @@
 """Aplicación web (FastAPI) — bandeja de revisión de descargas para Jellyfin."""
+import asyncio
 import json
 import html
 import os
@@ -2399,7 +2400,15 @@ async def api_comparator_trash_pair(request: Request):
     ids = payload.get("ids") or []
     keep_id = payload.get("keep_id")
     reason = payload.get("reason") or "Descartado al comparar lado a lado"
-    ok, message = comparator.trash_files_batch(ids, keep_id=keep_id, reason=reason)
+    ok, message = await asyncio.to_thread(
+        comparator.trash_files_batch, ids, keep_id=keep_id, reason=reason
+    )
+    return {"ok": ok, "message": message}
+
+
+@app.post("/api/comparador/exclude/{file_id}")
+def api_comparator_exclude(file_id: int):
+    ok, message = comparator.exclude_from_similar(file_id)
     return {"ok": ok, "message": message}
 
 

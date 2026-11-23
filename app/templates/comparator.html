@@ -738,7 +738,34 @@
     }
     function openSelectedCompare() { if (selA && selB) openCompareModal(selA.id, selB.id); }
 
-    // ---- Confirmación segura (soporta comillas/apóstrofes) y bloqueo anti-doble-clic ----
+    // ---- Toast flotante de estado en vivo ----
+    var _toastTimer = null;
+    function showCompToast(text, kind) {
+      var el = document.getElementById("compToast");
+      if (!el) {
+        el = document.createElement("div");
+        el.id = "compToast";
+        el.style.cssText = "position:fixed;top:14px;right:14px;z-index:9999;max-width:420px;padding:.7rem 1rem;border-radius:10px;font-weight:600;font-size:.9rem;box-shadow:0 8px 28px rgba(0,0,0,.45);border:1px solid #39465c;background:#1a2230;color:#fff;transition:opacity .2s;";
+        document.body.appendChild(el);
+      }
+      el.textContent = text;
+      el.style.borderColor = kind === "err" ? "#e55353" : (kind === "ok" ? "#2fb36d" : "#4ea1ff");
+      el.style.opacity = "1";
+      el.style.display = "block";
+      if (_toastTimer) { clearTimeout(_toastTimer); _toastTimer = null; }
+      if (kind === "ok" || kind === "err") {
+        _toastTimer = setTimeout(function () { el.style.opacity = "0"; setTimeout(function () { el.style.display = "none"; }, 220); }, 4500);
+      }
+    }
+
+    // ---- Confirmación segura (soporta comillas/apóstrofes), AJAX rápido por fila y bloqueo anti-doble-clic ----
+    var _AJAX_ROW_ACTIONS = {
+      "/comparador/delete": { api: "/api/comparador/delete/", busy: "⏳ Borrando...", toast: "⏳ Borrando definitivamente del NAS..." },
+      "/comparador/trash": { api: "/api/comparador/trash/", busy: "⏳ Moviendo...", toast: "⏳ Moviendo archivo a la Papelera..." },
+      "/comparador/restore": { api: "/api/comparador/restore/", busy: "⏳ Restaurando...", toast: "⏳ Restaurando archivo..." },
+      "/comparador/same-name/exclude": { api: "/api/comparador/exclude/", busy: "⏳ Sacando...", toast: "⏳ Sacando del grupo..." }
+    };
+
     document.addEventListener("submit", function (ev) {
       var form = ev.target;
       if (!form || !form.closest || !form.closest(".comp-page")) return;
@@ -750,10 +777,56 @@
         ev.preventDefault();
         return;
       }
+
+      // Acciones por archivo individual: ejecutar por AJAX en paralelo para no bloquear ni recargar toda la página
+      var actionPath = (submitter && submitter.getAttribute("formaction")) || form.getAttribute("action") || "";
+      var ajaxCfg = _AJAX_ROW_ACTIONS[actionPath];
+      var fileIdInput = form.querySelector('input[name="file_id"]');
+      if (ajaxCfg && fileIdInput && fileIdInput.value) {
+        ev.preventDefault();
+        if (submitter && submitter.disabled) return;
+        var row = form.closest(".comp-row");
+        var origText = submitter ? submitter.textContent : "";
+        if (submitter) { submitter.disabled = true; submitter.textContent = ajaxCfg.busy; }
+        if (row) { row.style.opacity = "0.55"; }
+        showCompToast(ajaxCfg.toast, "busy");
+        fetch(ajaxCfg.api + encodeURIComponent(fileIdInput.value), { method: "POST" })
+          .then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            return r.json();
+          })
+          .then(function (res) {
+            if (res && res.ok) {
+              showCompToast("✅ " + (res.message || "Listo"), "ok");
+              if (row) {
+                var parentCard = row.closest(".comp-group-card");
+                row.remove();
+                if (parentCard && parentCard.querySelectorAll(".comp-row").length <= 1) {
+                  parentCard.style.opacity = "0.6";
+                }
+              }
+            } else {
+              showCompToast("⚠️ " + ((res && res.message) || "No se pudo completar"), "err");
+              if (row) row.style.opacity = "1";
+              if (submitter) { submitter.disabled = false; submitter.textContent = origText; }
+            }
+          })
+          .catch(function (err) {
+            showCompToast("⚠️ Error: " + (err && err.message ? err.message : "conexión con el NAS"), "err");
+            if (row) row.style.opacity = "1";
+            if (submitter) { submitter.disabled = false; submitter.textContent = origText; }
+          });
+        return;
+      }
+
+      // Formularios de página completa (Vaciar papelera, Mandar todos, Conservar esta, etc.)
+      showCompToast("⏳ Procesando en el NAS, espera un momento...", "busy");
       if (submitter && !submitter.disabled) {
-        submitter.disabled = true;
         submitter.dataset.originalText = submitter.textContent;
-        submitter.textContent = "⏳ Procesando...";
+        setTimeout(function () {
+          submitter.disabled = true;
+          submitter.textContent = "⏳ Procesando...";
+        }, 0);
       }
     });
 
@@ -935,7 +1008,10 @@
     }
 
     function modalAction(action, fileId, path, btn) {
-      if (_modalBusy) return;
+      if (_modalBusy) {
+        showCompToast("⏳ Ya hay una operación en curso en el modal...", "busy");
+        return;
+      }
       var msg = action === "delete"
         ? "⚠️ BORRADO DEFINITIVO\n\n" + path + "\n\nEsta acción NO se puede deshacer. ¿Seguro?"
         : (action === "restore"
@@ -943,43 +1019,66 @@
           : "¿Mover este archivo a la papelera?\n\n" + path);
       if (!confirm(msg)) return;
       _modalBusy = true;
+      var origText = btn ? btn.textContent : "";
       if (btn) { btn.disabled = true; btn.textContent = "⏳ Procesando..."; }
+      showCompToast(action === "delete" ? "⏳ Borrando definitivamente..." : (action === "restore" ? "⏳ Restaurando..." : "⏳ Moviendo a papelera..."), "busy");
       fetch("/api/comparador/" + action + "/" + fileId, { method: "POST" })
-        .then(function (r) { return r.json(); })
+        .then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        })
         .then(function (res) {
           _modalBusy = false;
-          alert(res.message || "Listo");
-          if (res.ok) { closeCompareModal(); location.reload(); }
-          else if (btn) { btn.disabled = false; }
+          if (res && res.ok) {
+            showCompToast("✅ " + (res.message || "Listo"), "ok");
+            closeCompareModal();
+            location.reload();
+          } else {
+            showCompToast("⚠️ " + ((res && res.message) || "No se pudo completar"), "err");
+            if (btn) { btn.disabled = false; btn.textContent = origText; }
+          }
         })
-        .catch(function () {
+        .catch(function (err) {
           _modalBusy = false;
-          alert("Error de conexión con el NAS.");
-          if (btn) btn.disabled = false;
+          showCompToast("⚠️ Error: " + (err && err.message ? err.message : "conexión con el NAS"), "err");
+          if (btn) { btn.disabled = false; btn.textContent = origText; }
         });
     }
 
     function modalPairAction(ids, keepId, confirmMsg, btn) {
-      if (_modalBusy) return;
+      if (_modalBusy) {
+        showCompToast("⏳ Ya hay una operación en curso en el modal...", "busy");
+        return;
+      }
       if (!confirm(confirmMsg)) return;
       _modalBusy = true;
+      var origText = btn ? btn.textContent : "";
       if (btn) { btn.disabled = true; btn.textContent = "⏳ Procesando..."; }
+      showCompToast("⏳ Moviendo a papelera en el NAS...", "busy");
       fetch("/api/comparador/trash-pair", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids: ids, keep_id: keepId })
       })
-        .then(function (r) { return r.json(); })
+        .then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        })
         .then(function (res) {
           _modalBusy = false;
-          alert(res.message || "Listo");
-          if (res.ok) { closeCompareModal(); location.reload(); }
-          else if (btn) { btn.disabled = false; }
+          if (res && res.ok) {
+            showCompToast("✅ " + (res.message || "Listo"), "ok");
+            closeCompareModal();
+            location.reload();
+          } else {
+            showCompToast("⚠️ " + ((res && res.message) || "No se pudo completar"), "err");
+            if (btn) { btn.disabled = false; btn.textContent = origText; }
+          }
         })
-        .catch(function () {
+        .catch(function (err) {
           _modalBusy = false;
-          alert("Error de conexión con el NAS.");
-          if (btn) btn.disabled = false;
+          showCompToast("⚠️ Error: " + (err && err.message ? err.message : "conexión con el NAS"), "err");
+          if (btn) { btn.disabled = false; btn.textContent = origText; }
         });
     }
   </script>
