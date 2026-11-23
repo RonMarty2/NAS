@@ -316,10 +316,13 @@
                 <div>
                   <h3>⚖️ {{ g.label }}</h3>
                   <small>{{ g.count }} archivo(s) parecidos · Total: {{ g.total_text }}</small>
+                  {% if g.count >= 8 %}
+                    <div><span class="comp-warn-chip">⚠️ Grupo grande ({{ g.count }}): verifica si son videos distintos numerados antes de usar «Conservar esta»</span></div>
+                  {% endif %}
                 </div>
                 <div class="comp-group-actions">
                   {% if g.files|length >= 2 %}
-                    <button type="button" class="btn btn-primary btn-sm" onclick="openCompareModal({{ g.files[0].id }}, {{ g.files[1].id }})">⚖️ Comparar lado a lado</button>
+                    <button type="button" class="btn btn-compare btn-sm" onclick="openCompareModal({{ g.files[0].id }}, {{ g.files[1].id }})">⚖️ Comparar lado a lado</button>
                   {% endif %}
                   <form method="post" action="/comparador/same-name/ignore" style="margin:0;">
                     <input type="hidden" name="norm_name" value="{{ g.key }}">
@@ -769,6 +772,7 @@
     document.addEventListener("submit", function (ev) {
       var form = ev.target;
       if (!form || !form.closest || !form.closest(".comp-page")) return;
+      if ((form.getAttribute("method") || "get").toLowerCase() !== "post") return;
       var submitter = ev.submitter || form.querySelector('button[type="submit"]');
       var msg = (submitter && submitter.dataset && submitter.dataset.confirm)
         || (form.dataset && form.dataset.confirm)
@@ -805,6 +809,17 @@
                   parentCard.style.opacity = "0.6";
                 }
               }
+              // Actualizar contador de Papelera en la pestaña si corresponde
+              var trashTab = document.querySelector('a.catalog-subtab[href="/comparador?view=trash"]');
+              if (trashTab) {
+                var m = trashTab.textContent.match(/\((\d+)\)/);
+                if (m) {
+                  var n = parseInt(m[1], 10);
+                  if (actionPath === "/comparador/trash") n += 1;
+                  else if (actionPath === "/comparador/restore" || (actionPath === "/comparador/delete" && location.search.indexOf("view=trash") !== -1)) n = Math.max(0, n - 1);
+                  trashTab.textContent = trashTab.textContent.replace(/\(\d+\)/, "(" + n + ")");
+                }
+              }
             } else {
               showCompToast("⚠️ " + ((res && res.message) || "No se pudo completar"), "err");
               if (row) row.style.opacity = "1";
@@ -828,6 +843,20 @@
           submitter.textContent = "⏳ Procesando...";
         }, 0);
       }
+    });
+
+    // Cerrar modales con Escape o clic en el fondo oscuro
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape") {
+        var pm = document.getElementById("compPreviewModal");
+        if (pm && !pm.classList.contains("hidden")) closeCompareModal();
+        var fm = document.getElementById("compFolderModal");
+        if (fm && !fm.classList.contains("hidden")) closeCompFolderPicker();
+      }
+    });
+    document.addEventListener("click", function (ev) {
+      if (ev.target && ev.target.id === "compPreviewModal") closeCompareModal();
+      if (ev.target && ev.target.id === "compFolderModal") closeCompFolderPicker();
     });
 
     // ---- Modal de reproducción y comparación lado a lado ----

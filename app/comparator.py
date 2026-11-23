@@ -92,6 +92,8 @@ CREATE INDEX IF NOT EXISTS idx_comp_hash ON comparator_files(fast_hash);
 CREATE INDEX IF NOT EXISTS idx_comp_norm ON comparator_files(norm_name);
 CREATE INDEX IF NOT EXISTS idx_comp_root ON comparator_files(root_path);
 CREATE INDEX IF NOT EXISTS idx_comp_trashed ON comparator_files(trashed);
+CREATE INDEX IF NOT EXISTS idx_comp_ident ON comparator_files(trashed, size_bytes, fast_hash);
+CREATE INDEX IF NOT EXISTS idx_comp_similar ON comparator_files(trashed, ignore_similar, norm_name);
 """
 
 _FILE_MIGRATIONS = {
@@ -1367,7 +1369,7 @@ def trash_same_name_group(norm_name):
         return False, "Grupo no válido."
     with db.get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, size_bytes FROM comparator_files "
+            "SELECT id, root_path, size_bytes FROM comparator_files "
             "WHERE trashed = 0 AND COALESCE(ignore_similar, 0) = 0 AND norm_name = ?",
             (norm_name,),
         ).fetchall()
@@ -1375,17 +1377,24 @@ def trash_same_name_group(norm_name):
         return False, "No hay archivos activos en este grupo."
     moved = 0
     moved_bytes = 0
+    touched_roots = set()
     for r in rows:
         ok, _ = trash_file(
             r["id"],
             kept_copy_path="",
             reason="Grupo completo enviado a papelera por ti",
+            refresh_stats=False,
         )
         if ok:
             moved += 1
             moved_bytes += int(r["size_bytes"] or 0)
+            if r["root_path"]:
+                touched_roots.add(r["root_path"])
+    for rp in touched_roots:
+        _refresh_root_stats(rp, "ok")
     if moved == 0:
         return False, "No se pudo mover ningún archivo a la papelera."
+    catalog.invalidate_build()
     return True, f"Listo: {moved} archivo(s) ({format_bytes(moved_bytes)}) movidos a la Papelera."
 
 
@@ -1393,7 +1402,7 @@ def trash_identical_group(fast_hash, size_bytes):
     """Mueve TODOS los archivos activos de un grupo de 'Idénticos' a la Papelera."""
     with db.get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, size_bytes FROM comparator_files "
+            "SELECT id, root_path, size_bytes FROM comparator_files "
             "WHERE trashed = 0 AND size_bytes = ? AND fast_hash = ?",
             (int(size_bytes), fast_hash),
         ).fetchall()
@@ -1401,17 +1410,24 @@ def trash_identical_group(fast_hash, size_bytes):
         return False, "No hay archivos activos en este grupo."
     moved = 0
     moved_bytes = 0
+    touched_roots = set()
     for r in rows:
         ok, _ = trash_file(
             r["id"],
             kept_copy_path="",
             reason="Grupo idéntico completo enviado a papelera por ti",
+            refresh_stats=False,
         )
         if ok:
             moved += 1
             moved_bytes += int(r["size_bytes"] or 0)
+            if r["root_path"]:
+                touched_roots.add(r["root_path"])
+    for rp in touched_roots:
+        _refresh_root_stats(rp, "ok")
     if moved == 0:
         return False, "No se pudo mover ningún archivo a la papelera."
+    catalog.invalidate_build()
     return True, f"Listo: {moved} archivo(s) ({format_bytes(moved_bytes)}) movidos a la Papelera."
 
 
@@ -1426,18 +1442,24 @@ def trash_files_batch(file_ids, keep_id=None, reason="Descartado al comparar lad
 
     moved = 0
     moved_bytes = 0
+    touched_roots = set()
     for fid in file_ids:
         if keep_id and int(fid) == int(keep_id):
             continue
         item = get_file(int(fid))
         if not item or item.get("trashed"):
             continue
-        ok, _ = trash_file(int(fid), kept_copy_path=keep_path, reason=reason)
+        ok, _ = trash_file(int(fid), kept_copy_path=keep_path, reason=reason, refresh_stats=False)
         if ok:
             moved += 1
             moved_bytes += int(item.get("size_bytes") or 0)
+            if item.get("root_path"):
+                touched_roots.add(item["root_path"])
+    for rp in touched_roots:
+        _refresh_root_stats(rp, "ok")
     if moved == 0:
         return False, "No se movió ningún archivo (puede que ya estuvieran en la papelera)."
+    catalog.invalidate_build()
     if keep_path:
         return True, f"Movido(s) {moved} archivo(s) ({format_bytes(moved_bytes)}) a Papelera. Conservado: {keep_path}"
     return True, f"Movido(s) {moved} archivo(s) ({format_bytes(moved_bytes)}) a Papelera."
@@ -1674,7 +1696,7 @@ def keep_one_in_same_name_group(keep_id, norm_name):
 
     with db.get_conn() as conn:
         others = conn.execute(
-            "SELECT id, path, size_bytes FROM comparator_files "
+            "SELECT id, root_path, path, size_bytes FROM comparator_files "
             "WHERE trashed = 0 AND COALESCE(ignore_similar, 0) = 0 AND norm_name = ? AND id != ?",
             (norm_name, int(keep_id)),
         ).fetchall()
@@ -1683,15 +1705,23 @@ def keep_one_in_same_name_group(keep_id, norm_name):
 
     moved = 0
     moved_bytes = 0
+    touched_roots = set()
     for r in others:
         ok, _ = trash_file(
             r["id"],
             kept_copy_path=keep_path,
             reason="Descartado por ti al comparar versiones similares",
+            refresh_stats=False,
         )
         if ok:
             moved += 1
             moved_bytes += int(r["size_bytes"] or 0)
+            if r["root_path"]:
+                touched_roots.add(r["root_path"])
+    for rp in touched_roots:
+        _refresh_root_stats(rp, "ok")
+    if moved:
+        catalog.invalidate_build()
 
     return True, (
         f"Conservaste «{keeper['filename']}» ({keep_path}). "
@@ -1858,7 +1888,7 @@ def _release_file_op(file_id):
         _BUSY_FILE_IDS.discard(fid)
 
 
-def trash_file(file_id, kept_copy_path="", reason="Movido manualmente"):
+def trash_file(file_id, kept_copy_path="", reason="Movido manualmente", refresh_stats=True):
     if not _acquire_file_op(file_id):
         return False, "Este archivo ya se está procesando..."
     try:
@@ -1910,9 +1940,10 @@ def trash_file(file_id, kept_copy_path="", reason="Movido manualmente"):
                 """,
                 (dest, src, _now(), kept_copy_path or "", reason or "", file_id),
             )
-        db.delete_catalog_file(src)
-        catalog.invalidate_build()
-        _refresh_root_stats(item["root_path"], "ok")
+            conn.execute("DELETE FROM catalog_files WHERE path=?", (src,))
+        if refresh_stats:
+            catalog.invalidate_build()
+            _refresh_root_stats(item["root_path"], "ok")
         return True, f"Movido a papelera: {dest}"
     finally:
         _release_file_op(file_id)
@@ -1973,6 +2004,7 @@ def empty_trash():
     freed = 0
     errors = 0
     deleted_ids = []
+    catalog_paths = []
     for r in rows:
         fid = r["id"]
         if not _acquire_file_op(fid):
@@ -1988,9 +2020,9 @@ def empty_trash():
                 deleted += 1
                 freed += int(r["size_bytes"] or 0)
                 deleted_ids.append((fid,))
-                db.delete_catalog_file(p)
+                catalog_paths.append((p,))
                 if r["trashed_from"]:
-                    db.delete_catalog_file(r["trashed_from"])
+                    catalog_paths.append((r["trashed_from"],))
             except OSError:
                 errors += 1
         finally:
@@ -1999,6 +2031,8 @@ def empty_trash():
     if deleted_ids:
         with db._lock, db.get_conn() as conn:
             conn.executemany("DELETE FROM comparator_files WHERE id=?", deleted_ids)
+            if catalog_paths:
+                conn.executemany("DELETE FROM catalog_files WHERE path=?", catalog_paths)
         catalog.invalidate_build()
 
     msg = f"Papelera vaciada: {deleted} archivo(s) borrados, {format_bytes(freed)} liberados."

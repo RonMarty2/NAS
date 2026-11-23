@@ -919,3 +919,12 @@ hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
 .comp-kept-box { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-top: .35rem; padding: .4rem .6rem; border-radius: 8px; background: rgba(46, 204, 113, .1); border: 1px solid rgba(46, 204, 113, .3); font-size: .84rem; word-break: break-all; }
 .comp-space-bar { width: 100%; height: 8px; border-radius: 999px; background: rgba(255,255,255,.08); overflow: hidden; margin-top: .45rem; }
 .comp-space-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, #00a4dc, #2ecc71); min-width: 4px; }
+
+/* Colores claros en Comparador: azul/verde para acciones seguras, rojo SOLO para borrar */
+.comp-page .btn-primary { background: #1f7a4c; color: #fff; border: 1px solid #2aa165; }
+.comp-page .btn-primary:hover { background: #26935c; }
+.comp-page .btn-compare { background: #0c6e96; color: #fff; border: 1px solid #1693c6; }
+.comp-page .btn-compare:hover { background: #1084b4; }
+.comp-page .btn-danger { background: #9b2234; color: #fff; border: 1px solid #c53449; }
+.comp-page .btn-danger:hover { background: #bd2b40; }
+.comp-warn-chip { display: inline-block; font-size: .78rem; padding: .2rem .55rem; border-radius: 6px; background: rgba(240, 173, 78, .15); color: #ffd08a; border: 1px solid rgba(240, 173, 78, .4); margin-top: .3rem; }
