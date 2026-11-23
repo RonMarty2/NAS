@@ -93,7 +93,6 @@ CREATE INDEX IF NOT EXISTS idx_comp_norm ON comparator_files(norm_name);
 CREATE INDEX IF NOT EXISTS idx_comp_root ON comparator_files(root_path);
 CREATE INDEX IF NOT EXISTS idx_comp_trashed ON comparator_files(trashed);
 CREATE INDEX IF NOT EXISTS idx_comp_ident ON comparator_files(trashed, size_bytes, fast_hash);
-CREATE INDEX IF NOT EXISTS idx_comp_similar ON comparator_files(trashed, ignore_similar, norm_name);
 """
 
 _FILE_MIGRATIONS = {
@@ -177,6 +176,9 @@ def init_db(force=False):
             for col, coltype in _FILE_MIGRATIONS.items():
                 if col not in existing_cols:
                     conn.execute(f"ALTER TABLE comparator_files ADD COLUMN {col} {coltype}")
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_comp_similar ON comparator_files(trashed, ignore_similar, norm_name)"
+            )
             # Limpia automáticamente cualquier archivo interno de sistema Synology (@* / #*)
             # que pudiera haberse colado en una versión anterior.
             conn.execute(
